@@ -100,9 +100,8 @@ uniscrapper/
 
 ## Notas importantes
 
-- Este scrapper fue autorizado por la UCC para uso personal
-- Las credenciales nunca se almacenan en el código
-- El navegador se cierra automáticamente al finalizar
+- Las credenciales NO se almacenan en otro lugar, todo es desde el propio dispositivo
+- El navegador se cierra automáticamente al finalizar 
 - Los módulos "Presentación", "Para estudiantes" y "Biblioteca" se excluyen automáticamente
 
 ## Solución de problemas
