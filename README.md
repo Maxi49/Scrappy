@@ -63,12 +63,32 @@ Se organizan carpetas por materia y módulo en `output/` y se exporta:
 
 1. `recursos_encontrados.json`: Formato JSON estructurado con todos los recursos
 2. `recursos_encontrados.txt`: Formato texto legible con organización por materia y módulo
-3. `output/config/manifest.json`: Manifiesto interno para detección de cambios (no editar).
 
-## Rendimiento aproximado
+## Estructura del proyecto
 
-- Scrapeo completo de 12 materias: ~3 minutos 40 segundos (headless, conexión estable).
-- Descargas paralelas con hilos; el tiempo real depende del ancho de banda y tamaño de archivos.
+```
+uniscrapper/
+├── main.py                 # Punto de entrada
+├── scraper/
+│   ├── __init__.py
+│   ├── auth.py            # Autenticación en Moodle
+│   ├── navigator.py       # Navegación y orquestación
+│   ├── parser.py          # Parsing del HTML
+│   └── models.py          # Modelos de datos
+├── utils/
+│   ├── __init__.py
+│   └── config.py          # Configuración
+├── output/                # Resultados del scraping
+├── requirements.txt       # Dependencias
+└── README.md             # Este archivo
+```
+
+## Notas importantes
+
+- Este scrapper fue autorizado por la UCC para uso personal
+- Las credenciales nunca se almacenan en el código
+- El navegador se cierra automáticamente al finalizar
+- Los módulos "Presentación", "Para estudiantes" y "Biblioteca" se excluyen automáticamente
 
 ## Solución de problemas
 
