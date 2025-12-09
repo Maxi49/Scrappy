@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Archivos de configuración sensibles
+.env
+
+# Salida del scrapper
+output/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+/examples
+.claude
+
+user_settings.json
