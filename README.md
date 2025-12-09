@@ -1,21 +1,18 @@
 # Scrapper Moodle UCC
 
-Scrapper automatizado para extraer recursos educativos de la plataforma Moodle de la Universidad Católica de Córdoba.
+Scrapper automatizado (con GUI) para extraer recursos educativos de la plataforma Moodle de la Universidad Católica de Córdoba.
 
 ## Características
 
-- Autenticación automática en Moodle
-- Extracción de todas las materias del usuario
-- Navegación automática por módulos de cada materia
-- Identificación de diferentes tipos de recursos:
-  - PDFs
-  - PowerPoint
-  - Documentos Word
-  - Videos de YouTube
-  - Enlaces externos
-  - Carpetas y archivos genéricos
-- Exportación de resultados en JSON y TXT
-- Filtrado de módulos no relevantes (Presentación, Para estudiantes, Biblioteca)
+- Autenticación automática en Moodle (puede recordar credenciales con keyring).
+- Reutiliza la última carpeta de destino seleccionada (persistida en `config/user_settings.json`).
+- Scraping paralelo (3–4 navegadores en paralelo) y descargas en paralelo con `requests`.
+- Modos por materia: actualizar (solo cambios), solo módulos nuevos o forzar descarga completa.
+- Manifiesto por materia (`output/config/manifest.json`) para detectar cambios y saltar módulos sin novedades.
+- Identificación de recursos: PDFs, PPT/PPTX, Word, YouTube, enlaces externos, pluginfile, Google Drive (guardados como accesos directos `.url`), carpetas y archivos genéricos.
+- Exporta resultados en JSON y TXT. Descarga archivos a `output/` organizados por materia/módulo.
+- Filtrado de módulos no relevantes (Presentación, Para estudiantes, Biblioteca).
+- Headless opcional.
 
 ## Requisitos
 
@@ -25,12 +22,10 @@ Scrapper automatizado para extraer recursos educativos de la plataforma Moodle d
 ## Instalación
 
 1. Clonar o descargar este repositorio
-
 2. Crear un entorno virtual (recomendado):
 ```bash
 python -m venv venv
 ```
-
 3. Activar el entorno virtual:
    - Windows:
    ```bash
@@ -40,7 +35,6 @@ python -m venv venv
    ```bash
    source venv/bin/activate
    ```
-
 4. Instalar dependencias:
 ```bash
 pip install -r requirements.txt
@@ -52,58 +46,29 @@ pip install -r requirements.txt
 
 ## Uso
 
-### Modo básico (pedirá credenciales por consola):
+Ejecuta la GUI:
 ```bash
 python main.py
 ```
 
-### Con credenciales por argumentos:
-```bash
-python main.py --username tu_usuario --password tu_contraseña
-```
-
-### Modo headless (sin interfaz gráfica):
-```bash
-python main.py --headless
-```
-
-### Sin exportar resultados:
-```bash
-python main.py --no-export
-```
+En la interfaz podrás:
+- Ingresar credenciales (opcionalmente recordarlas).
+- Seleccionar materias y aplicar modos de scraping (actualizar, solo módulos nuevos o completa).
+- Elegir la carpeta de destino (se recuerda para el próximo inicio).
+- Iniciar en modo headless o visible.
 
 ## Salida
 
-El scrapper genera dos archivos en la carpeta `output/`:
+Se organizan carpetas por materia y módulo en `output/` y se exporta:
 
 1. `recursos_encontrados.json`: Formato JSON estructurado con todos los recursos
 2. `recursos_encontrados.txt`: Formato texto legible con organización por materia y módulo
+3. `output/config/manifest.json`: Manifiesto interno para detección de cambios (no editar).
 
-## Estructura del proyecto
+## Rendimiento aproximado
 
-```
-uniscrapper/
-├── main.py                 # Punto de entrada
-├── scraper/
-│   ├── __init__.py
-│   ├── auth.py            # Autenticación en Moodle
-│   ├── navigator.py       # Navegación y orquestación
-│   ├── parser.py          # Parsing del HTML
-│   └── models.py          # Modelos de datos
-├── utils/
-│   ├── __init__.py
-│   └── config.py          # Configuración
-├── output/                # Resultados del scraping
-├── requirements.txt       # Dependencias
-└── README.md             # Este archivo
-```
-
-## Notas importantes
-
-- Este scrapper fue autorizado por la UCC para uso personal
-- Las credenciales nunca se almacenan en el código
-- El navegador se cierra automáticamente al finalizar
-- Los módulos "Presentación", "Para estudiantes" y "Biblioteca" se excluyen automáticamente
+- Scrapeo completo de 12 materias: ~3 minutos 40 segundos (headless, conexión estable).
+- Descargas paralelas con hilos; el tiempo real depende del ancho de banda y tamaño de archivos.
 
 ## Solución de problemas
 
@@ -118,4 +83,4 @@ Aumenta el valor de `TIMEOUT` en `utils/config.py` si tu conexión es lenta.
 
 ## Licencia
 
-Este proyecto es de uso educativo y personal.
+MIT License.
