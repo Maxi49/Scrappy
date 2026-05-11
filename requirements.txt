@@ -7,3 +7,4 @@ PyQt6==6.6.1
 PyQt6-Qt6==6.6.1
 requests==2.31.0
 keyring==24.3.1
+backports.tarfile==1.2.0

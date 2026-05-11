@@ -400,6 +400,7 @@ pyinstaller \
   --hidden-import keyring.backends.Windows \
   --hidden-import keyring.backends.SecretService \
   --hidden-import keyring.backends.kwallet \
+  --collect-submodules backports \
   main.py
 ```
 
