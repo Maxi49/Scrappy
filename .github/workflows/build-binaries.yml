@@ -21,8 +21,6 @@ jobs:
             artifact: Scrappy-linux
           - os: windows-2022
             artifact: Scrappy-windows
-          - os: macos-13
-            artifact: Scrappy-macos-intel
           - os: macos-14
             artifact: Scrappy-macos-apple-silicon
 
@@ -72,6 +70,12 @@ jobs:
           --hidden-import keyring.backends.SecretService
           --hidden-import keyring.backends.kwallet
           main.py
+
+      - name: Ad-hoc sign macOS app
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --deep --sign - --options runtime dist/Scrappy.app
+          codesign --verify --deep --strict --verbose=2 dist/Scrappy.app
 
       - name: Package artifact
         env:

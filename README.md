@@ -63,7 +63,6 @@ El proyecto genera un artefacto por sistema operativo con GitHub Actions:
 
 - `Scrappy-linux.zip`
 - `Scrappy-windows.zip`
-- `Scrappy-macos-intel.zip`
 - `Scrappy-macos-apple-silicon.zip`
 
 Para crear builds multiplataforma:
