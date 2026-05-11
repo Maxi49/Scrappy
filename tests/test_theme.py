@@ -6,7 +6,7 @@ class ThemeTest(unittest.TestCase):
             BG_APP, BG_SIDEBAR, BG_CARD, BG_INPUT, BG_ITEM_ACTIVE, BG_ITEM_HOVER,
             BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, SUCCESS, ERROR, LOG_BG, LOG_FG,
         )
-        hex_re = re.compile(r'#[0-9a-fA-F]{6}')
+        hex_re = re.compile(r'^#[0-9a-fA-F]{6}$')
         for c in [BG_APP, BG_SIDEBAR, BG_CARD, BG_INPUT, BG_ITEM_ACTIVE, BG_ITEM_HOVER,
                   BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, SUCCESS, ERROR, LOG_BG, LOG_FG]:
             self.assertRegex(c, hex_re, f"Invalid hex color: {c}")

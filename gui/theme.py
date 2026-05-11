@@ -13,6 +13,10 @@ ERROR            = "#f44747"
 LOG_BG           = "#060d1a"
 LOG_FG           = "#a3e635"
 
+ACCENT_HOVER     = "#1a8fe3"
+ACCENT_PRESSED   = "#006bbf"
+SCROLLBAR_HANDLE = "#555555"
+
 GLOBAL_STYLESHEET = f"""
 QWidget {{
     background-color: {BG_APP};
@@ -38,15 +42,15 @@ QPushButton {{
     padding: 8px 14px;
     font-weight: 600;
 }}
-QPushButton:hover {{ background-color: #1a8fe3; }}
-QPushButton:pressed {{ background-color: #006bbf; }}
-QPushButton:disabled {{ background-color: #37373d; color: {TEXT_SECONDARY}; }}
+QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}
+QPushButton:pressed {{ background-color: {ACCENT_PRESSED}; }}
+QPushButton:disabled {{ background-color: {BG_ITEM_ACTIVE}; color: {TEXT_SECONDARY}; }}
 QPushButton#ghost {{
     background: transparent;
     border: 1px solid {BORDER};
     color: {TEXT_PRIMARY};
 }}
-QPushButton#ghost:hover {{ border-color: #555; background: {BG_ITEM_HOVER}; }}
+QPushButton#ghost:hover {{ border-color: {SCROLLBAR_HANDLE}; background: {BG_ITEM_HOVER}; }}
 QComboBox {{
     background: {BG_INPUT};
     border: 1px solid {BORDER};
@@ -89,7 +93,7 @@ QScrollBar:vertical {{
     width: 8px;
 }}
 QScrollBar::handle:vertical {{
-    background: #555;
+    background: {SCROLLBAR_HANDLE};
     min-height: 24px;
     border-radius: 4px;
 }}
