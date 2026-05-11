@@ -135,13 +135,19 @@ Si Windows SmartScreen muestra una advertencia, se debe a que la app todavía no
 
 1. Descargar `Scrappy-linux.zip`.
 2. Extraer el zip.
-3. Dar permisos de ejecución si hiciera falta:
+3. Entrar a la carpeta extraída:
+
+```bash
+cd Scrappy
+```
+
+4. Dar permisos de ejecución si hiciera falta:
 
 ```bash
 chmod +x Scrappy
 ```
 
-4. Ejecutar:
+5. Ejecutar:
 
 ```bash
 ./Scrappy

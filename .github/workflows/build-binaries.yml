@@ -90,6 +90,32 @@ jobs:
           ditto -x -k "artifacts/${{ matrix.artifact }}.zip" packaged-check
           codesign --verify --deep --strict --verbose=2 packaged-check/Scrappy.app
 
+      - name: Smoke test packaged Linux app
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          rm -rf packaged-check
+          mkdir packaged-check
+          unzip -q "artifacts/${{ matrix.artifact }}.zip" -d packaged-check
+          test -x packaged-check/Scrappy/Scrappy
+          packaged-check/Scrappy/Scrappy --help
+
+      - name: Smoke test packaged Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force packaged-check -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory packaged-check | Out-Null
+          Expand-Archive -Path "artifacts/${{ matrix.artifact }}.zip" -DestinationPath packaged-check
+          if (-not (Test-Path "packaged-check/Scrappy/Scrappy.exe")) {
+            throw "Packaged executable not found"
+          }
+          & ".\packaged-check\Scrappy\Scrappy.exe" --help
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
