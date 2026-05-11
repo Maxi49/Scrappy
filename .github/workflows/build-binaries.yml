@@ -75,13 +75,27 @@ jobs:
       - name: Ad-hoc sign macOS app
         if: runner.os == 'macOS'
         run: |
-          codesign --force --deep --sign - --options runtime dist/Scrappy.app
+          codesign --force --deep --sign - dist/Scrappy.app
           codesign --verify --deep --strict --verbose=2 dist/Scrappy.app
 
       - name: Package artifact
         env:
           SCRAPPY_ARTIFACT_NAME: ${{ matrix.artifact }}
         run: python scripts/package_artifact.py
+
+      - name: Package macOS DMG
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf dmg-root
+          mkdir dmg-root
+          ditto dist/Scrappy.app dmg-root/Scrappy.app
+          ln -s /Applications dmg-root/Applications
+          hdiutil create \
+            -volname Scrappy \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            "artifacts/${{ matrix.artifact }}.dmg"
 
       - name: Verify packaged macOS app
         if: runner.os == 'macOS'
@@ -90,6 +104,7 @@ jobs:
           mkdir packaged-check
           ditto -x -k "artifacts/${{ matrix.artifact }}.zip" packaged-check
           codesign --verify --deep --strict --verbose=2 packaged-check/Scrappy.app
+          packaged-check/Scrappy.app/Contents/MacOS/Scrappy --help
 
       - name: Smoke test packaged Linux app
         if: runner.os == 'Linux'
@@ -121,11 +136,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: artifacts/*.zip
+          path: |
+            artifacts/*.zip
+            artifacts/*.dmg
           if-no-files-found: error
 
       - name: Upload binaries to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: |
+            artifacts/*.zip
+            artifacts/*.dmg

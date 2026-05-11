@@ -39,7 +39,7 @@ Casos no cubiertos todavía:
 
 - Auto-update dentro de la app.
 - Notarización oficial de macOS con Apple Developer ID.
-- Instaladores `.msi`, `.dmg`, `.pkg`, `.deb` o `.AppImage`.
+- Instaladores `.msi`, `.pkg`, `.deb` o `.AppImage`.
 - Sincronización bidireccional.
 - Ejecución como servicio/background daemon.
 
@@ -122,6 +122,7 @@ Archivos publicados:
 - `Scrappy-windows.zip`
 - `Scrappy-linux.zip`
 - `Scrappy-macos-apple-silicon.zip`
+- `Scrappy-macos-apple-silicon.dmg`
 
 ### Windows
 
@@ -157,10 +158,12 @@ Si el sistema no tiene librerías gráficas necesarias para Qt, instalar los paq
 
 ### macOS Apple Silicon
 
-1. Descargar `Scrappy-macos-apple-silicon.zip`.
-2. Extraer el zip.
-3. Mover `Scrappy.app` a `Applications` si se desea.
+1. Descargar `Scrappy-macos-apple-silicon.dmg`.
+2. Abrir el DMG.
+3. Arrastrar `Scrappy.app` a `Applications`.
 4. Abrir con click derecho y luego **Open/Abrir** la primera vez.
+
+También se publica `Scrappy-macos-apple-silicon.zip` para diagnóstico o uso manual.
 
 La app está firmada ad-hoc en CI para que el bundle sea válido, pero no está notarizada por Apple. Por eso macOS puede advertir que proviene de un desarrollador no identificado. Para eliminar ese aviso por completo hace falta una cuenta Apple Developer y notarización oficial.
 
@@ -442,7 +445,7 @@ Matriz actual:
 
 - Ubuntu 22.04: `Scrappy-linux.zip`
 - Windows Server 2022: `Scrappy-windows.zip`
-- macOS 14 Apple Silicon: `Scrappy-macos-apple-silicon.zip`
+- macOS 14 Apple Silicon: `Scrappy-macos-apple-silicon.zip` y `Scrappy-macos-apple-silicon.dmg`
 
 Pasos principales del workflow:
 
@@ -454,9 +457,10 @@ Pasos principales del workflow:
 6. Build con PyInstaller.
 7. Firma ad-hoc del `.app` en macOS.
 8. Empaquetado.
-9. Verificación del zip macOS descomprimido con `codesign --verify`.
-10. Upload de artifacts.
-11. Upload al GitHub Release cuando el workflow corre sobre un tag.
+9. Creación de DMG en macOS.
+10. Verificación del zip macOS descomprimido con `codesign --verify` y smoke test del ejecutable.
+11. Upload de artifacts.
+12. Upload al GitHub Release cuando el workflow corre sobre un tag.
 
 ## Arquitectura
 
