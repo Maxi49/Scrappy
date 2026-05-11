@@ -131,3 +131,108 @@ class MateriasGrid(QtWidgets.QScrollArea):
 
     def selected_count(self) -> int:
         return sum(1 for card in self._cards if card.is_selected())
+
+
+class MateriasPanel(QtWidgets.QWidget):
+    start_requested = QtCore.pyqtSignal(list, dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+
+        header = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("Materias")
+        title.setStyleSheet(
+            f"font-size: 16px; font-weight: 700; color: {TEXT_PRIMARY}; background: transparent;"
+        )
+        self._counter_label = QtWidgets.QLabel("")
+        self._counter_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 13px; background: transparent;"
+        )
+        header.addWidget(title)
+        header.addWidget(self._counter_label)
+        header.addStretch()
+
+        all_link = self._make_link("Todas")
+        all_link.linkActivated.connect(lambda _: self._select_all())
+        none_link = self._make_link("Ninguna")
+        none_link.linkActivated.connect(lambda _: self._select_none())
+        sep = QtWidgets.QLabel("·")
+        sep.setStyleSheet(f"color: {TEXT_SECONDARY}; background: transparent;")
+        header.addWidget(all_link)
+        header.addWidget(sep)
+        header.addWidget(none_link)
+        layout.addLayout(header)
+
+        self._grid = MateriasGrid()
+        layout.addWidget(self._grid, stretch=1)
+
+        mode_lbl = QtWidgets.QLabel("Modo de descarga")
+        mode_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; background: transparent;")
+        layout.addWidget(mode_lbl)
+
+        self.mode_combo = QtWidgets.QComboBox()
+        self.mode_combo.addItem("Actualizar (buscar cambios en módulos)", ("update", True))
+        self.mode_combo.addItem("Solo módulos nuevos", ("update", False))
+        self.mode_combo.addItem("Forzar descarga completa", ("full", True))
+        layout.addWidget(self.mode_combo)
+
+        self._progress_label = QtWidgets.QLabel("")
+        self._progress_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 12px; background: transparent;"
+        )
+        self._progress_bar = QtWidgets.QProgressBar()
+        self._progress_bar.setRange(0, 0)
+        self._progress_bar.setFixedHeight(6)
+        self._progress_label.setVisible(False)
+        self._progress_bar.setVisible(False)
+        layout.addWidget(self._progress_label)
+        layout.addWidget(self._progress_bar)
+
+        self.start_btn = QtWidgets.QPushButton("Comenzar descarga")
+        self.start_btn.setMinimumHeight(38)
+        self.start_btn.clicked.connect(self._on_start_clicked)
+        layout.addWidget(self.start_btn)
+
+    def _make_link(self, text: str) -> QtWidgets.QLabel:
+        link = QtWidgets.QLabel(f'<a href="{text}" style="color:{ACCENT};text-decoration:none;">{text}</a>')
+        link.setOpenExternalLinks(False)
+        link.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        return link
+
+    def populate(self, materias: List[Materia]):
+        self._grid.populate(materias)
+        self._counter_label.setText(f"· {len(materias)} disponibles")
+
+    def get_selected_materias(self) -> List[Materia]:
+        return self._grid.get_selected()
+
+    def get_mode(self) -> dict:
+        data = self.mode_combo.currentData()
+        if not data:
+            return {"mode": "update", "scan_existing": True}
+        return {"mode": data[0], "scan_existing": data[1]}
+
+    def set_running(self, running: bool):
+        self.start_btn.setEnabled(not running)
+        self.mode_combo.setEnabled(not running)
+        self._progress_label.setVisible(running)
+        self._progress_bar.setVisible(running)
+
+    def update_progress(self, text: str):
+        self._progress_label.setText(text)
+
+    def _on_start_clicked(self):
+        materias = self.get_selected_materias()
+        if not materias:
+            return
+        mode = self.get_mode()
+        self.start_requested.emit(materias, {materia.nombre: mode for materia in materias})
+
+    def _select_all(self):
+        self._grid.select_all()
+
+    def _select_none(self):
+        self._grid.select_none()
