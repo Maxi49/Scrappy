@@ -57,6 +57,41 @@ En la interfaz podrás:
 - Elegir la carpeta de destino (se recuerda para el próximo inicio).
 - Iniciar en modo headless o visible.
 
+## Builds para compartir
+
+El proyecto genera un artefacto por sistema operativo con GitHub Actions:
+
+- `Scrappy-linux.zip`
+- `Scrappy-windows.zip`
+- `Scrappy-macos-intel.zip`
+- `Scrappy-macos-apple-silicon.zip`
+
+Para crear builds multiplataforma:
+
+1. Subir los cambios a GitHub.
+2. Ir a **Actions → Build binaries → Run workflow**.
+3. Descargar el zip correspondiente desde los artifacts del workflow.
+
+También se puede disparar creando un tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Build local para probar en tu sistema:
+
+```bash
+python -m pip install -r requirements.txt -r requirements-build.txt
+pyinstaller --noconfirm --clean --windowed --name Scrappy main.py
+python scripts/package_artifact.py
+```
+
+Notas:
+- Cada plataforma debe compilarse en su propio sistema operativo; PyInstaller no genera `.exe` de Windows desde macOS ni binario Linux desde Windows.
+- Los usuarios siguen necesitando Google Chrome instalado para el fallback Selenium. Cuando la API está disponible, el navegador no se usa.
+- En macOS, si Gatekeeper bloquea la app por no estar firmada, abrir con click derecho → **Open/Abrir** la primera vez.
+
 ## Salida
 
 Se organizan carpetas por materia y módulo en `output/` y se exporta:

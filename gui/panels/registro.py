@@ -51,6 +51,8 @@ class RegistroPanel(QtWidgets.QWidget):
             return
         self.log_view.append(text)
         scroll = self.log_view.verticalScrollBar()
+        if scroll is None:
+            return
         scroll.setValue(scroll.maximum())
 
     def clear(self):

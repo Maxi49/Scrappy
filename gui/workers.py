@@ -8,8 +8,16 @@ class ScraperWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(bool, str)
     progress = QtCore.pyqtSignal(str)
 
-    def __init__(self, username, password, output_path, headless,
-                 materias=None, materia_modes=None, api_token=""):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        output_path: str,
+        headless: bool,
+        materias: Optional[List[Materia]] = None,
+        materia_modes: Optional[dict] = None,
+        api_token: str = "",
+    ):
         super().__init__()
         self.username = username
         self.password = password
@@ -36,7 +44,7 @@ class ScraperWorker(QtCore.QThread):
 class FetchMateriasWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(bool, list, str, str)
 
-    def __init__(self, username, password, base_url):
+    def __init__(self, username: str, password: str, base_url: str):
         super().__init__()
         self.username = username
         self.password = password

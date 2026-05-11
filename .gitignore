@@ -9,6 +9,8 @@ venv/
 ENV/
 build/
 dist/
+artifacts/
+*.spec
 *.egg-info/
 
 # Entornos virtuales

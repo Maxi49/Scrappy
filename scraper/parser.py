@@ -1,13 +1,17 @@
 """
-Parser para extraer información del HTML de Moodle
+Parser para extraer información del HTML de Moodle (fallback Selenium)
 """
+import re
+import time
+import traceback
+import unicodedata
+from typing import List
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from typing import List, Tuple
-import re
-import unicodedata
+from selenium.webdriver.support.wait import WebDriverWait
+
 from scraper.models import Materia, Modulo, Recurso, TipoRecurso
 from utils.config import Config
 
@@ -59,15 +63,10 @@ class MoodleParser:
 
             print("Esperando a que se carguen los cursos...")
 
-            # Esperar a que exista el contenedor de cursos
+            # Esperar a que los enlaces de cursos estén presentes en el DOM
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-region='courses-view']")))
+            wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href*='/course/view.php?id=']")))
 
-            # Esperar a que el placeholder de carga desaparezca
-            # Esto indica que el contenido dinámico ya se cargó
-            import time
-            time.sleep(3)  # Dar tiempo para que AJAX cargue los cursos
-
-            # Buscar enlaces con Selenium directamente (mejor para contenido dinámico)
             enlaces_cursos = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/course/view.php?id=']")
 
             # Usar set para evitar duplicados
@@ -101,7 +100,6 @@ class MoodleParser:
 
         except Exception as e:
             print(f"Error al obtener materias: {str(e)}")
-            import traceback
             traceback.print_exc()
 
         return materias
@@ -130,14 +128,10 @@ class MoodleParser:
 
             print("Esperando a que se carguen los módulos...")
 
-            # Esperar a que exista el contenedor de tiles
+            # Esperar a que los tiles estén renderizados
             wait.until(EC.presence_of_element_located((By.ID, "multi_section_tiles")))
+            wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "li.tile.tile-clickable")))
 
-            # Dar tiempo para que JavaScript cargue completamente
-            import time
-            time.sleep(2)
-
-            # Buscar todos los tiles con Selenium
             tiles = self.driver.find_elements(By.CSS_SELECTOR, "li.tile.tile-clickable")
 
             print(f"  Se encontraron {len(tiles)} tiles en total")
@@ -175,7 +169,6 @@ class MoodleParser:
 
         except Exception as e:
             print(f"  Error al obtener módulos: {str(e)}")
-            import traceback
             traceback.print_exc()
 
         return modulos
@@ -252,12 +245,9 @@ class MoodleParser:
             print(f"  Navegando al módulo: {modulo.nombre}")
             self.driver.get(modulo.url)
 
-            # Esperar a que cargue el contenido
             wait = WebDriverWait(self.driver, 30)
-            import time
-            time.sleep(2)  # Dar tiempo para que se cargue dinámicamente
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "li.activity, .course-content")))
 
-            # 1. Extraer recursos de actividades normales (li.activity)
             actividades = self.driver.find_elements(By.CSS_SELECTOR, "li.activity")
             print(f"    Se encontraron {len(actividades)} actividades")
 
@@ -355,7 +345,6 @@ class MoodleParser:
 
         except Exception as e:
             print(f"    Error al extraer recursos: {str(e)}")
-            import traceback
             traceback.print_exc()
 
         return recursos

@@ -5,6 +5,11 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from gui.theme import BG_INPUT, BG_ITEM_ACTIVE, BG_ITEM_HOVER, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT
 from scraper.models import Materia
 
+CARD_MIN_WIDTH = 220
+CARD_HEIGHT = 90
+GRID_GAP = 16
+GRID_RIGHT_MARGIN = 8
+
 
 class MateriaCard(QtWidgets.QFrame):
     toggled = QtCore.pyqtSignal(object, bool)
@@ -13,39 +18,50 @@ class MateriaCard(QtWidgets.QFrame):
         super().__init__(parent)
         self.materia = materia
         self._selected = True
-        self.setFixedSize(160, 90)
+        self.setMinimumSize(CARD_MIN_WIDTH, CARD_HEIGHT)
+        self.setFixedHeight(CARD_HEIGHT)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
         self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(24, 12, 24, 12)
+        layout.setSpacing(0)
 
-        top = QtWidgets.QHBoxLayout()
-        top.addStretch()
-        self._check = QtWidgets.QLabel("✓")
+        self._check = QtWidgets.QLabel("✓", self)
+        self._check.setFixedSize(22, 22)
+        self._check.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._check.setStyleSheet(
-            f"color: {ACCENT}; font-size: 12px; font-weight: 700; "
+            f"color: {ACCENT}; font-size: 16px; font-weight: 700; "
             "background: transparent; border: none;"
         )
-        top.addWidget(self._check)
-        layout.addLayout(top)
 
         self._name = QtWidgets.QLabel(materia.nombre)
+        self._name.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._name.setWordWrap(True)
         self._name.setStyleSheet(
             f"color: {TEXT_PRIMARY}; font-size: 12px; background: transparent; border: none;"
         )
-        layout.addWidget(self._name)
+        layout.addStretch()
+        layout.addWidget(self._name, stretch=1)
         layout.addStretch()
 
         self._update_style()
 
-    def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            self.set_selected(not self._selected)
-            event.accept()
+    def mousePressEvent(self, a0):
+        if a0 is None:
             return
-        super().mousePressEvent(event)
+        if a0.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.set_selected(not self._selected)
+            a0.accept()
+            return
+        super().mousePressEvent(a0)
+
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
+        self._check.move(self.width() - self._check.width() - 12, 10)
 
     def set_selected(self, selected: bool):
         selected = bool(selected)
@@ -95,17 +111,21 @@ class MateriasGrid(QtWidgets.QScrollArea):
         self._container = QtWidgets.QWidget()
         self._container.setStyleSheet("background: transparent;")
         self._grid = QtWidgets.QGridLayout(self._container)
-        self._grid.setSpacing(10)
-        self._grid.setContentsMargins(0, 0, 8, 0)
+        self._grid.setSpacing(GRID_GAP)
+        self._grid.setContentsMargins(0, 0, GRID_RIGHT_MARGIN, 0)
+        self._grid.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        self._grid.setColumnStretch(0, 1)
+        self._grid.setColumnStretch(1, 1)
         self.setWidget(self._container)
         self._cards: List[MateriaCard] = []
 
     def populate(self, materias: List[Materia]):
         while self._grid.count():
             item = self._grid.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
 
         self._cards.clear()
         for index, materia in enumerate(materias):

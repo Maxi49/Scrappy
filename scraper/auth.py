@@ -3,12 +3,37 @@ Manejo de autenticación en Moodle UCC
 """
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import getpass
 import time
+import requests
+from typing import Optional
 from utils.config import Config
+
+
+def get_moodle_token(username: str, password: str, base_url: str) -> str | None:
+    """
+    Obtiene un token de Moodle Web Services vía POST.
+    Usa data dict para que requests encodee correctamente caracteres especiales (#, @, etc).
+    Retorna el token como string, o None si los web services no están habilitados o las credenciales fallan.
+    """
+    try:
+        resp = requests.post(
+            f"{base_url}/login/token.php",
+            data={
+                "username": username,
+                "password": password,
+                "service": "moodle_mobile_app",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("token") or None
+    except Exception:
+        return None
 
 
 class MoodleAuthenticator:
@@ -35,7 +60,7 @@ class MoodleAuthenticator:
 
         return username, password
 
-    def login(self, username: str = None, password: str = None):
+    def login(self, username: Optional[str] = None, password: Optional[str] = None):
         """
         Realiza el login en Moodle.
 

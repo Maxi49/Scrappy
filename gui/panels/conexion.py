@@ -20,6 +20,8 @@ class ConexionPanel(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.username_input = QtWidgets.QLineEdit()
+        self.password_input = QtWidgets.QLineEdit()
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 40)
 
@@ -34,13 +36,14 @@ class ConexionPanel(QtWidgets.QWidget):
         title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {TEXT_PRIMARY}; background: transparent; border: none;")
         cl.addWidget(title)
 
-        for lbl_text, attr, pw in [("Usuario UCC", "username_input", False), ("Contraseña", "password_input", True)]:
+        for lbl_text, inp, pw in [
+            ("Usuario UCC", self.username_input, False),
+            ("Contraseña", self.password_input, True),
+        ]:
             lbl = QtWidgets.QLabel(lbl_text)
             lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; background: transparent; border: none;")
-            inp = QtWidgets.QLineEdit()
             if pw:
                 inp.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-            setattr(self, attr, inp)
             cl.addWidget(lbl)
             cl.addWidget(inp)
 
