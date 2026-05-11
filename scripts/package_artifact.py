@@ -1,8 +1,35 @@
 import os
 import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+
+def make_archive(package_root: Path, archive_base: Path, system: str | None = None) -> str:
+    archive_path = archive_base.with_suffix(".zip")
+    if archive_path.exists():
+        archive_path.unlink()
+
+    if system is None:
+        system = platform.system()
+
+    if system == "Darwin" and package_root.suffix == ".app":
+        subprocess.run(
+            [
+                "ditto",
+                "-c",
+                "-k",
+                "--sequesterRsrc",
+                "--keepParent",
+                str(package_root),
+                str(archive_path),
+            ],
+            check=True,
+        )
+        return str(archive_path)
+
+    return shutil.make_archive(str(archive_base), "zip", package_root.parent, package_root.name)
 
 
 def main() -> int:
@@ -34,7 +61,7 @@ def main() -> int:
         return 1
 
     archive_base = artifacts_dir / artifact_name
-    archive_path = shutil.make_archive(str(archive_base), "zip", package_root.parent, package_root.name)
+    archive_path = make_archive(package_root, archive_base)
     print(f"Created {archive_path}")
     return 0
 

@@ -82,6 +82,14 @@ jobs:
           SCRAPPY_ARTIFACT_NAME: ${{ matrix.artifact }}
         run: python scripts/package_artifact.py
 
+      - name: Verify packaged macOS app
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf packaged-check
+          mkdir packaged-check
+          ditto -x -k "artifacts/${{ matrix.artifact }}.zip" packaged-check
+          codesign --verify --deep --strict --verbose=2 packaged-check/Scrappy.app
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
