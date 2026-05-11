@@ -1,37 +1,36 @@
 import io
-import sys
 import unittest
 from contextlib import redirect_stderr
+from unittest.mock import patch
 
-from PyQt6 import QtWidgets, QtCore, QtGui, QtTest
-
-
-from scraper.models import Materia
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 import gui
+from scraper.models import Materia
+
+
 def get_app():
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        app = QtWidgets.QApplication([])
-    return app
+    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
-class FontWarningTest(unittest.TestCase):
+class MateriasGridRenderTest(unittest.TestCase):
     def setUp(self):
         self.app = get_app()
 
-    def test_no_font_warning_on_scroll_and_mouse(self):
+    @patch("keyring.get_password", return_value=None)
+    def test_no_qt_errors_on_grid_scroll(self, _get_password):
         window = gui.ScrappyGUI()
-        materias = [Materia(nombre=f"Materia {i}", url=f"http://example.com/{i}") for i in range(15)]
-        window._populate_materias_list(materias)
-        window.resize(900, 600)
+        window.materias_panel.populate([
+            Materia(nombre=f"Materia {i}", url=f"http://example.com/{i}", id_curso=str(i))
+            for i in range(15)
+        ])
+        window.resize(960, 640)
         window.show()
-        self.app.processEvents()
 
         buf = io.StringIO()
         with redirect_stderr(buf):
-            # Simular movimiento de mouse y scroll en la lista
-            QtTest.QTest.mouseMove(window.materias_view.viewport(), QtCore.QPoint(5, 5))
+            self.app.processEvents()
+            viewport = window.materias_panel._grid.viewport()
             event = QtGui.QWheelEvent(
                 QtCore.QPointF(10, 10),
                 QtCore.QPointF(10, 10),
@@ -43,11 +42,10 @@ class FontWarningTest(unittest.TestCase):
                 False,
                 QtCore.Qt.MouseEventSource.MouseEventNotSynthesized,
             )
-            QtWidgets.QApplication.sendEvent(window.materias_view.viewport(), event)
+            QtWidgets.QApplication.sendEvent(viewport, event)
             self.app.processEvents()
 
-        output = buf.getvalue()
-        self.assertNotIn("Point size <=", output)
+        self.assertNotIn("Point size <=", buf.getvalue())
 
 
 if __name__ == "__main__":
