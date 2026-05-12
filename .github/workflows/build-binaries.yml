@@ -69,6 +69,8 @@ jobs:
           --hidden-import keyring.backends.Windows
           --hidden-import keyring.backends.SecretService
           --hidden-import keyring.backends.kwallet
+          --hidden-import backports
+          --hidden-import backports.tarfile
           --collect-submodules backports
           main.py
 
@@ -115,7 +117,10 @@ jobs:
           mkdir packaged-check
           unzip -q "artifacts/${{ matrix.artifact }}.zip" -d packaged-check
           test -x packaged-check/Scrappy/Scrappy
-          packaged-check/Scrappy/Scrappy --help
+          archive_listing="$(printf 'O PYZ-00.pyz\nL\nQ\nQ\n' | pyi-archive_viewer packaged-check/Scrappy/Scrappy)"
+          echo "$archive_listing" | grep -q "'backports'"
+          echo "$archive_listing" | grep -q "'backports.tarfile'"
+          env -i HOME="$HOME" QT_QPA_PLATFORM=offscreen packaged-check/Scrappy/Scrappy --help
 
       - name: Smoke test packaged Windows app
         if: runner.os == 'Windows'

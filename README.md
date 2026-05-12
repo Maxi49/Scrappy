@@ -403,6 +403,8 @@ pyinstaller \
   --hidden-import keyring.backends.Windows \
   --hidden-import keyring.backends.SecretService \
   --hidden-import keyring.backends.kwallet \
+  --hidden-import backports \
+  --hidden-import backports.tarfile \
   --collect-submodules backports \
   main.py
 ```
@@ -459,8 +461,9 @@ Pasos principales del workflow:
 8. Empaquetado.
 9. Creación de DMG en macOS.
 10. Verificación del zip macOS descomprimido con `codesign --verify` y smoke test del ejecutable.
-11. Upload de artifacts.
-12. Upload al GitHub Release cuando el workflow corre sobre un tag.
+11. Smoke test del binario Linux en un entorno limpio, más inspección del archivo PyInstaller para confirmar que incluye `backports`.
+12. Upload de artifacts.
+13. Upload al GitHub Release cuando el workflow corre sobre un tag.
 
 ## Arquitectura
 
