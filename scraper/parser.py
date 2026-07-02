@@ -5,7 +5,9 @@ import re
 import time
 import traceback
 import unicodedata
+from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -14,6 +16,14 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 from scraper.models import Materia, Modulo, Recurso, TipoRecurso
 from utils.config import Config
+
+_EXT_TIPOS = {
+    ".pdf": TipoRecurso.PDF,
+    ".ppt": TipoRecurso.POWERPOINT,
+    ".pptx": TipoRecurso.POWERPOINT,
+    ".doc": TipoRecurso.WORD,
+    ".docx": TipoRecurso.WORD,
+}
 
 
 class MoodleParser:
@@ -195,17 +205,12 @@ class MoodleParser:
         if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
             return TipoRecurso.VIDEO_YOUTUBE
 
-        # PDFs
-        if '.pdf' in url_lower or 'pdf' in nombre_lower:
-            return TipoRecurso.PDF
-
-        # PowerPoint
-        if any(ext in url_lower for ext in ['.ppt', '.pptx']) or 'powerpoint' in nombre_lower:
-            return TipoRecurso.POWERPOINT
-
-        # Word
-        if any(ext in url_lower for ext in ['.doc', '.docx']) or 'word' in nombre_lower:
-            return TipoRecurso.WORD
+        # Extensión real en la URL: señal inequívoca, se evalúa antes que
+        # cualquier heurística por nombre (evita falsos positivos como un
+        # recurso llamado "Comparación PDF vs Word" que no es ninguno de los dos).
+        extension = Path(urlparse(url).path).suffix.lower()
+        if extension in _EXT_TIPOS:
+            return _EXT_TIPOS[extension]
 
         # Carpetas en Moodle
         if '/mod/folder/' in url_lower:
@@ -214,6 +219,14 @@ class MoodleParser:
         # Recursos genéricos en Moodle
         if '/mod/resource/' in url_lower:
             return TipoRecurso.ARCHIVO
+
+        # Último recurso: heurística débil por nombre, solo cuando la URL no dio señal
+        if 'pdf' in nombre_lower:
+            return TipoRecurso.PDF
+        if 'powerpoint' in nombre_lower:
+            return TipoRecurso.POWERPOINT
+        if 'word' in nombre_lower:
+            return TipoRecurso.WORD
 
         # Links externos
         if url.startswith('http') and 'presencial.ucc.edu.ar' not in url:

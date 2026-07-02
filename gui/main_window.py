@@ -175,6 +175,14 @@ class ScrappyGUI(QtWidgets.QMainWindow):
             pass
 
     def _save_credentials(self):
+        # Si el usuario recordado cambia, borrar la contraseña del usuario anterior
+        # para no dejarla huérfana en el keychain del sistema indefinidamente.
+        try:
+            usuario_anterior = keyring.get_password(self._keyring_service, "last_username")
+            if usuario_anterior and usuario_anterior != self._username:
+                keyring.delete_password(self._keyring_service, usuario_anterior)
+        except Exception:
+            pass
         try:
             keyring.set_password(self._keyring_service, "last_username", self._username)
             keyring.set_password(self._keyring_service, self._username, self._password)

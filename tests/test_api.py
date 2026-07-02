@@ -33,6 +33,40 @@ class MoodleAPIConversionTest(unittest.TestCase):
         self.assertEqual(recurso.tipo, TipoRecurso.PDF)
         self.assertIn("/webservice/pluginfile.php/", recurso.url)
         self.assertNotEqual(recurso.tipo, TipoRecurso.CARPETA)
+        self.assertEqual(recurso.subcarpeta, "")
+
+    def test_same_filename_in_different_subfolders_keeps_distinct_subcarpeta(self):
+        """
+        Reproduce el caso real de "Algoritmos": una carpeta de ejercicios donde
+        cada tema tiene su propia subcarpeta con un archivo de nombre genérico
+        (nodo.h). Sin distinguir subcarpetas, los tres recursos son
+        indistinguibles y navigator.py los trata como colisiones de nombre.
+        """
+        from scraper.api import api_contents_to_modulos
+
+        materia = Materia(nombre="ALGORITMOS Y ESTRUCTURAS DE DATOS", url="http://course", id_curso="1")
+        sections = [{
+            "name": "Práctico",
+            "modules": [{
+                "modname": "folder",
+                "name": "Ejercicios",
+                "url": "https://presencial.ucc.edu.ar/mod/folder/view.php?id=1",
+                "contents": [
+                    {"type": "file", "filename": "nodo.h", "filepath": "/",
+                     "fileurl": "https://presencial.ucc.edu.ar/webservice/pluginfile.php/1/mod_folder/content/1/nodo.h"},
+                    {"type": "file", "filename": "nodo.h", "filepath": "/Pila/",
+                     "fileurl": "https://presencial.ucc.edu.ar/webservice/pluginfile.php/2/mod_folder/content/1/Pila/nodo.h"},
+                    {"type": "file", "filename": "nodo.h", "filepath": "/Cola/",
+                     "fileurl": "https://presencial.ucc.edu.ar/webservice/pluginfile.php/3/mod_folder/content/2/Cola/nodo.h"},
+                ],
+            }],
+        }]
+
+        modulos = api_contents_to_modulos(sections, materia, [])
+
+        self.assertEqual(len(modulos), 1)
+        subcarpetas = sorted(r.subcarpeta for r in modulos[0].recursos)
+        self.assertEqual(subcarpetas, ["", "Cola", "Pila"])
 
 
 if __name__ == "__main__":

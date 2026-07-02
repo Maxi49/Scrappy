@@ -50,10 +50,12 @@ def main() -> int:
         else:
             artifact_name = f"Scrappy-{system or 'unknown'}"
 
+    # El build usa PyInstaller en modo onedir (sin --onefile), así que en
+    # Windows y Linux el output es siempre la carpeta dist/Scrappy/ (el .exe
+    # queda adentro); dist/Scrappy.exe nunca se genera con la config actual.
     candidates = [
         dist_dir / "Scrappy.app",
         dist_dir / "Scrappy",
-        dist_dir / "Scrappy.exe",
     ]
     package_root = next((path for path in candidates if path.exists()), None)
     if package_root is None:

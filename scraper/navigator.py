@@ -574,18 +574,48 @@ class MoodleScraper:
         url = recurso.url.lower()
         return ("presencial.ucc.edu.ar" in url) and ("/mod/resource/" in url or "/pluginfile.php" in url)
 
-    def _download_recurso(self, recurso: Recurso, base_dir: Path, session: requests.Session):
+    # Tipos que no se descargan como archivo: se guardan como acceso directo .url
+    # (o, para carpetas sin contenido expandido, como link a la carpeta en Moodle).
+    _TIPOS_ENLACE = (TipoRecurso.GOOGLE_DRIVE, TipoRecurso.LINK, TipoRecurso.VIDEO_YOUTUBE, TipoRecurso.CARPETA)
+
+    def _dir_para_recurso(self, recurso: Recurso, base_dir: Path) -> Path:
+        """
+        Directorio de destino para un recurso, preservando la subcarpeta de Moodle
+        (recurso.subcarpeta) cuando exista.
+
+        Sin esto, archivos con el mismo nombre en subcarpetas distintas de un mismo
+        recurso "folder" (ej. Pila/nodo.h, Cola/nodo.h, Hash/nodo.h) colisionan en
+        el mismo directorio de módulo y _ruta_unica los renombra como si fueran
+        duplicados (nodo.h, nodo_1.h, nodo_2.h...) en vez de mantenerlos separados.
+        """
         materia_dir = base_dir / self._sanitizar_nombre(recurso.materia_nombre, "materia")
         modulo_dir = materia_dir / self._sanitizar_nombre(recurso.modulo_nombre or "sin_modulo", "sin_modulo")
-        modulo_dir.mkdir(parents=True, exist_ok=True)
+        for parte in (recurso.subcarpeta or "").split("/"):
+            parte = parte.strip()
+            if parte:
+                modulo_dir = modulo_dir / self._sanitizar_nombre(parte, "sub")
+        return modulo_dir
 
-        if recurso.tipo == TipoRecurso.GOOGLE_DRIVE:
-            nombre_archivo = self._sanitizar_nombre(recurso.nombre, "enlace_drive") + ".url"
-            destino = self._ruta_unica(modulo_dir, nombre_archivo)
-            with open(destino, "w", encoding="utf-8") as f:
-                f.write(f"[InternetShortcut]\nURL={recurso.url}\n")
-            print(f"  ✓ {recurso.materia_nombre}/{recurso.modulo_nombre} -> enlace Drive: {destino.name}")
-            self._notify(f"Enlace Drive guardado: {recurso.nombre}")
+    def _guardar_enlace(self, recurso: Recurso, modulo_dir: Path):
+        etiqueta = {
+            TipoRecurso.GOOGLE_DRIVE: "enlace Drive",
+            TipoRecurso.LINK: "enlace",
+            TipoRecurso.VIDEO_YOUTUBE: "video YouTube",
+            TipoRecurso.CARPETA: "carpeta Moodle",
+        }.get(recurso.tipo, "enlace")
+        nombre_archivo = self._sanitizar_nombre(recurso.nombre, "enlace") + ".url"
+        destino = self._ruta_unica(modulo_dir, nombre_archivo)
+        with open(destino, "w", encoding="utf-8") as f:
+            f.write(f"[InternetShortcut]\nURL={recurso.url}\n")
+        print(f"  ✓ {recurso.materia_nombre}/{recurso.modulo_nombre} -> {etiqueta}: {destino.name}")
+        self._notify(f"{etiqueta.capitalize()} guardado: {recurso.nombre}")
+
+    def _download_recurso(self, recurso: Recurso, base_dir: Path, session: requests.Session):
+        modulo_dir = self._dir_para_recurso(recurso, base_dir)
+
+        if recurso.tipo in self._TIPOS_ENLACE:
+            modulo_dir.mkdir(parents=True, exist_ok=True)
+            self._guardar_enlace(recurso, modulo_dir)
             return
 
         if not self._es_descargable(recurso):
@@ -609,6 +639,7 @@ class MoodleScraper:
 
             iframe = soup.find("iframe", src=re.compile(r"docs.google.com/presentation"))
             if iframe and iframe.get("src"):
+                modulo_dir.mkdir(parents=True, exist_ok=True)
                 slides_name = self._sanitizar_nombre(f"{recurso.nombre} - Slides", "slides") + ".url"
                 slides_dest = self._ruta_unica(modulo_dir, slides_name)
                 with open(slides_dest, "w", encoding="utf-8") as f:
@@ -622,6 +653,7 @@ class MoodleScraper:
             download_resp.raise_for_status()
 
         filename = self._resolver_nombre_archivo(recurso, download_resp)
+        modulo_dir.mkdir(parents=True, exist_ok=True)
         destino = self._ruta_unica(modulo_dir, filename)
 
         # Descarga streaming con escritura atómica vía tmp

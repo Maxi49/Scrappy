@@ -136,12 +136,18 @@ def api_contents_to_modulos(sections: list, materia: Materia, excluidos: List[st
                     if content.get("type") == "file":
                         file_url = content.get("fileurl", mod_url)
                         file_name = content.get("filename") or nombre_mod
+                        # "filepath" indica la subcarpeta dentro de un recurso folder (ej. "/Pila/").
+                        # Sin esto, archivos con el mismo nombre en subcarpetas distintas
+                        # (típico en carpetas de ejercicios: Pila/nodo.h, Cola/nodo.h, Hash/nodo.h)
+                        # colisionan en el mismo directorio de salida y aparentan ser duplicados.
+                        subcarpeta = (content.get("filepath") or "/").strip("/")
                         recurso = Recurso(
                             nombre=file_name,
                             url=file_url,
                             tipo=_tipo_desde_archivo(file_name),
                             modulo_nombre=nombre_seccion,
                             materia_nombre=materia.nombre,
+                            subcarpeta=subcarpeta,
                         )
                         modulo.agregar_recurso(recurso)
             else:

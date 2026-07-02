@@ -27,6 +27,10 @@ class Recurso:
     tipo: TipoRecurso
     modulo_nombre: str
     materia_nombre: str
+    # Ruta de subcarpetas dentro de un recurso "folder" de Moodle (Moodle filepath, ej. "Pila/Sub"),
+    # vacío si el archivo está en la raíz del módulo. Necesario para no colisionar nombres
+    # de archivo repetidos entre subcarpetas (ver _dir_para_recurso en navigator.py).
+    subcarpeta: str = ""
 
     def to_dict(self):
         return {
@@ -34,7 +38,8 @@ class Recurso:
             "url": self.url,
             "tipo": self.tipo.value,
             "modulo": self.modulo_nombre,
-            "materia": self.materia_nombre
+            "materia": self.materia_nombre,
+            "subcarpeta": self.subcarpeta,
         }
 
 
