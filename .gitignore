@@ -8,6 +8,7 @@ env/
 venv/
 ENV/
 build/
+bin/
 dist/
 artifacts/
 *.spec

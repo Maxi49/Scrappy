@@ -1,6 +1,6 @@
 import unittest
 from PyQt6 import QtCore, QtWidgets
-from scraper.models import Materia
+from gui.models import Materia
 
 
 def get_app():

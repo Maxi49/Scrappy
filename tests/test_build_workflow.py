@@ -16,3 +16,12 @@ def test_linux_smoke_test_checks_backports_inside_pyinstaller_archive() -> None:
     assert "pyi-archive_viewer packaged-check/Scrappy/Scrappy" in workflow
     assert "grep -q \"'backports'\"" in workflow
     assert "grep -q \"'backports.tarfile'\"" in workflow
+
+
+def test_workflow_builds_and_smoke_tests_go_core() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "actions/setup-go@v5" in workflow
+    assert "python scripts/build_core.py" in workflow
+    assert "Contents/Frameworks/scrappy-core --version" in workflow
+    assert "_internal/scrappy-core --version" in workflow

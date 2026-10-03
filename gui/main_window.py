@@ -62,7 +62,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.conexion_panel.login_requested.connect(self._start_fetch)
         self.materias_panel = MateriasPanel()
         self.materias_panel.start_requested.connect(self._start_scraping)
-        self.config_panel = ConfiguracionPanel(self._output_path, self.config.HEADLESS)
+        self.config_panel = ConfiguracionPanel(self._output_path)
         self.config_panel.output_path_changed.connect(self._on_output_path_changed)
         self.registro_panel = RegistroPanel()
 
@@ -100,7 +100,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
             else:
                 self._clear_saved_credentials()
             self.materias_panel.populate(materias)
-            status = "Conectado · API ✓" if token else "Conectado"
+            status = "Conectado · Go API ✓"
             self.conexion_panel.set_status("connected", status)
             self._navigate_to(PANEL_MATERIAS)
             return
@@ -117,7 +117,6 @@ class ScrappyGUI(QtWidgets.QMainWindow):
             username=self._username,
             password=self._password,
             output_path=self.config_panel.get_output_path(),
-            headless=self.config_panel.get_headless(),
             materias=materias,
             materia_modes=materia_modes,
             api_token=self._api_token,

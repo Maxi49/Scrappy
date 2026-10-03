@@ -3,7 +3,7 @@ from typing import List
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from gui.theme import BG_INPUT, BG_ITEM_ACTIVE, BG_ITEM_HOVER, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT
-from scraper.models import Materia
+from gui.models import Materia
 
 CARD_MIN_WIDTH = 220
 CARD_HEIGHT = 90

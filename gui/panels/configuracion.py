@@ -6,7 +6,7 @@ from gui.theme import BG_CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY
 class ConfiguracionPanel(QtWidgets.QWidget):
     output_path_changed = QtCore.pyqtSignal(str)
 
-    def __init__(self, output_path: str, headless: bool, parent=None):
+    def __init__(self, output_path: str, parent=None):
         super().__init__(parent)
         self._output_path = output_path
         layout = QtWidgets.QVBoxLayout(self)
@@ -42,12 +42,6 @@ class ConfiguracionPanel(QtWidgets.QWidget):
         card_layout.addLayout(path_row)
         card_layout.addWidget(self._make_label("Se guarda automáticamente al cambiar.", size=11))
 
-        self.headless_toggle = QtWidgets.QCheckBox("Ocultar navegador mientras trabaja")
-        self.headless_toggle.setChecked(headless)
-        card_layout.addWidget(self.headless_toggle)
-        card_layout.addWidget(
-            self._make_label("Con API activa el navegador no se usa de todas formas.", size=11)
-        )
         card_layout.addStretch()
 
         center = QtWidgets.QHBoxLayout()
@@ -80,6 +74,3 @@ class ConfiguracionPanel(QtWidgets.QWidget):
         self._output_path = path
         self._path_display.setText(path)
         self._path_display.setCursorPosition(0)
-
-    def get_headless(self) -> bool:
-        return self.headless_toggle.isChecked()

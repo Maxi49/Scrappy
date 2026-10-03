@@ -1,9 +1,11 @@
-"""
-Script principal para ejecutar el scrapper de Moodle UCC
-"""
+"""Punto de entrada de Scrappy: UI PyQt o cliente CLI del core Go."""
 import sys
 import argparse
-from scraper.navigator import MoodleScraper
+import getpass
+import os
+
+from gui.core_bridge import CoreClient
+from utils.config import Config
 
 
 def main_cli():
@@ -11,7 +13,7 @@ def main_cli():
 
     # Configurar argumentos de línea de comandos
     parser = argparse.ArgumentParser(
-        description='Scrapper para Moodle UCC - Extrae recursos de cursos'
+        description='Scrappy para Moodle UCC - Descarga recursos de cursos'
     )
     parser.add_argument(
         '--username',
@@ -30,12 +32,19 @@ def main_cli():
         action='store_const',
         const=True,
         default=None,
-        help='Ejecutar en modo headless (por defecto usa Config.HEADLESS)'
+        # Sin efecto: se acepta para no romper scripts que usaban la versión Selenium.
+        help=argparse.SUPPRESS
     )
     parser.add_argument(
         '--no-export',
         action='store_true',
         help='No exportar los resultados a archivos'
+    )
+    parser.add_argument(
+        '--output',
+        '-o',
+        default='output',
+        help='Carpeta de destino (por defecto: output)'
     )
 
     args = parser.parse_args()
@@ -48,15 +57,33 @@ def main_cli():
     ╚══════════════════════════════════════════════════════════╝
     """)
 
-    # Crear y ejecutar scraper
-    scraper = MoodleScraper(headless=args.headless)
-    scraper.ejecutar(
-        username=args.username,
-        password=args.password,
-        exportar=not args.no_export
-    )
-
+    username = args.username or os.getenv("UCC_USERNAME", "") or input("Usuario: ").strip()
+    password = args.password or os.getenv("UCC_PASSWORD", "") or getpass.getpass("Contraseña: ")
+    core = CoreClient()
+    try:
+        materias, token = core.list_courses(username, password, Config.BASE_URL)
+        result = core.sync(
+            username=username,
+            password=password,
+            token=token,
+            base_url=Config.BASE_URL,
+            output_path=args.output,
+            export=not args.no_export,
+            materias=materias,
+            materia_modes={
+                materia.nombre: {"mode": "update", "scan_existing": True}
+                for materia in materias
+            },
+            progress=print,
+        )
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if not result.get("ok"):
+        print(f"Error: {result.get('error', 'descarga incompleta')}", file=sys.stderr)
+        return 1
     print("\n¡Proceso completado!")
+    return 0
 
 
 def main_gui():
@@ -70,10 +97,11 @@ def main():
     # Si hay argumentos de línea de comandos, usar CLI
     # Si no, usar GUI
     if len(sys.argv) > 1:
-        main_cli()
+        return main_cli()
     else:
         main_gui()
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,7 +1,29 @@
 from typing import Optional, List
 from PyQt6 import QtCore
-from scraper.navigator import MoodleScraper
-from scraper.models import Materia
+from gui.core_bridge import CoreClient
+from gui.models import Materia
+from utils.config import Config
+
+
+def summarize_report(report: Optional[dict]) -> List[str]:
+    """Convierte el reporte del core Go en líneas legibles para el registro."""
+    if not report:
+        return []
+    lines = [
+        "Resumen: "
+        f"{report.get('downloaded', 0)} descargados · "
+        f"{report.get('links_saved', 0)} enlaces · "
+        f"{report.get('unchanged', 0)} sin cambios · "
+        f"{report.get('skipped', 0)} omitidos · "
+        f"{report.get('inaccessible', 0)} inaccesibles · "
+        f"{report.get('failed', 0)} con error"
+    ]
+    for failure in report.get("failures") or []:
+        where = " / ".join(
+            part for part in (failure.get("materia"), failure.get("modulo"), failure.get("recurso")) if part
+        )
+        lines.append(f"  ✗ {where}: {failure.get('error', '')}")
+    return lines
 
 
 class ScraperWorker(QtCore.QThread):
@@ -13,7 +35,6 @@ class ScraperWorker(QtCore.QThread):
         username: str,
         password: str,
         output_path: str,
-        headless: bool,
         materias: Optional[List[Materia]] = None,
         materia_modes: Optional[dict] = None,
         api_token: str = "",
@@ -22,21 +43,26 @@ class ScraperWorker(QtCore.QThread):
         self.username = username
         self.password = password
         self.output_path = output_path
-        self.headless = headless
         self.materias = materias
         self.materia_modes = materia_modes or {}
         self.api_token = api_token
 
     def run(self):
         try:
-            scraper = MoodleScraper(headless=self.headless, api_token=self.api_token)
-            scraper.progress_cb = lambda msg: self.progress.emit(msg)
-            scraper.config.OUTPUT_DIR = self.output_path
-            ok = scraper.ejecutar(
-                username=self.username, password=self.password,
-                exportar=True, materias=self.materias, materia_modes=self.materia_modes,
+            result = CoreClient().sync(
+                username=self.username,
+                password=self.password,
+                token=self.api_token,
+                base_url=Config.BASE_URL,
+                output_path=self.output_path,
+                materias=self.materias or [],
+                materia_modes=self.materia_modes,
+                progress=lambda msg: self.progress.emit(msg),
             )
-            self.finished.emit(bool(ok), "" if ok else "Error durante el scraping.")
+            for line in summarize_report(result.get("report")):
+                self.progress.emit(line)
+            ok = bool(result.get("ok"))
+            self.finished.emit(ok, "" if ok else str(result.get("error", "Error durante la descarga.")))
         except Exception as exc:
             self.finished.emit(False, str(exc))
 
@@ -51,22 +77,13 @@ class FetchMateriasWorker(QtCore.QThread):
         self.base_url = base_url
 
     def run(self):
-        from scraper.auth import get_moodle_token
-        from scraper.api import MoodleAPIClient, api_courses_to_materias
-        token = get_moodle_token(self.username, self.password, self.base_url) or ""
         try:
-            if token:
-                client = MoodleAPIClient(token, self.base_url)
-                info = client.get_site_info()
-                courses = client.get_enrolled_courses(info["userid"])
-                materias = api_courses_to_materias(courses)
-            else:
-                scraper = MoodleScraper(headless=True)
-                materias = scraper.obtener_materias_con_credenciales(
-                    username=self.username, password=self.password)
+            materias, token = CoreClient().list_courses(
+                self.username, self.password, self.base_url
+            )
             if not materias:
                 self.finished.emit(False, [], "No se encontraron materias.", token)
                 return
             self.finished.emit(True, materias, "", token)
         except Exception as exc:
-            self.finished.emit(False, [], str(exc), token)
+            self.finished.emit(False, [], str(exc), "")

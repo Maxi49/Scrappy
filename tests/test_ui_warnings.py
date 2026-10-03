@@ -6,7 +6,7 @@ from unittest.mock import patch
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import gui
-from scraper.models import Materia
+from gui.models import Materia
 
 
 def get_app():

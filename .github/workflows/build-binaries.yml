@@ -34,6 +34,12 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
         run: |
@@ -53,26 +59,15 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests/ -v
+        run: |
+          go test ./...
+          python -m pytest tests/ -v
+
+      - name: Build Go core
+        run: python scripts/build_core.py
 
       - name: Build app
-        run: >
-          pyinstaller
-          --noconfirm
-          --clean
-          --windowed
-          --name Scrappy
-          --hidden-import keyring.backends.chainer
-          --hidden-import keyring.backends.fail
-          --hidden-import keyring.backends.null
-          --hidden-import keyring.backends.macOS
-          --hidden-import keyring.backends.Windows
-          --hidden-import keyring.backends.SecretService
-          --hidden-import keyring.backends.kwallet
-          --hidden-import backports
-          --hidden-import backports.tarfile
-          --collect-submodules backports
-          main.py
+        run: python scripts/build_desktop.py
 
       - name: Ad-hoc sign macOS app
         if: runner.os == 'macOS'
@@ -107,6 +102,7 @@ jobs:
           ditto -x -k "artifacts/${{ matrix.artifact }}.zip" packaged-check
           codesign --verify --deep --strict --verbose=2 packaged-check/Scrappy.app
           packaged-check/Scrappy.app/Contents/MacOS/Scrappy --help
+          packaged-check/Scrappy.app/Contents/Frameworks/scrappy-core --version
 
       - name: Smoke test packaged Linux app
         if: runner.os == 'Linux'
@@ -120,6 +116,8 @@ jobs:
           archive_listing="$(printf 'O PYZ-00.pyz\nL\nQ\nQ\n' | pyi-archive_viewer packaged-check/Scrappy/Scrappy)"
           echo "$archive_listing" | grep -q "'backports'"
           echo "$archive_listing" | grep -q "'backports.tarfile'"
+          test -x packaged-check/Scrappy/_internal/scrappy-core
+          packaged-check/Scrappy/_internal/scrappy-core --version
           env -i HOME="$HOME" QT_QPA_PLATFORM=offscreen packaged-check/Scrappy/Scrappy --help
 
       - name: Smoke test packaged Windows app
@@ -131,6 +129,13 @@ jobs:
           Expand-Archive -Path "artifacts/${{ matrix.artifact }}.zip" -DestinationPath packaged-check
           if (-not (Test-Path "packaged-check/Scrappy/Scrappy.exe")) {
             throw "Packaged executable not found"
+          }
+          if (-not (Test-Path "packaged-check/Scrappy/_internal/scrappy-core.exe")) {
+            throw "Packaged Go core not found"
+          }
+          & ".\packaged-check\Scrappy\_internal\scrappy-core.exe" --version
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
           }
           & ".\packaged-check\Scrappy\Scrappy.exe" --help
           if ($LASTEXITCODE -ne 0) {
