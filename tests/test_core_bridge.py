@@ -4,8 +4,16 @@ import sys
 import time
 from unittest.mock import patch
 
-from gui.core_bridge import CoreCancelled, CoreClient
+from gui.core_bridge import CREATE_NO_WINDOW, CoreCancelled, CoreClient
 from gui.models import Materia
+
+
+def fake_client(script: str) -> CoreClient:
+    """CoreClient that runs a Python fake core; works on every OS (Windows
+    cannot execute a shebang script directly)."""
+    client = CoreClient(script)
+    client._resolved_command = [sys.executable, script]
+    return client
 
 
 def make_fake_core(tmp_path: Path, lines: list[dict]) -> str:
@@ -36,7 +44,7 @@ def test_list_courses_maps_go_result(tmp_path):
             },
         ],
     )
-    materias, token = CoreClient(core).list_courses("user", "password", "https://moodle")
+    materias, token = fake_client(core).list_courses("user", "password", "https://moodle")
     assert token == "token"
     assert materias == [Materia("Materia", "https://moodle/12", "12")]
 
@@ -50,7 +58,7 @@ def test_sync_streams_progress_and_course_mode(tmp_path):
         ],
     )
     progress = []
-    result = CoreClient(core).sync(
+    result = fake_client(core).sync(
         username="user",
         password="password",
         token="token",
@@ -86,7 +94,7 @@ def test_cancel_stops_a_running_core(tmp_path):
         encoding="utf-8",
     )
     script.chmod(0o755)
-    client = CoreClient(str(script))
+    client = fake_client(str(script))
     started = time.monotonic()
     result = client.sync(
         username="user",
@@ -104,7 +112,7 @@ def test_cancel_stops_a_running_core(tmp_path):
 
 
 def test_cancelled_course_listing_raises(tmp_path):
-    client = CoreClient(make_fake_core(tmp_path, []))
+    client = fake_client(make_fake_core(tmp_path, []))
     client.cancel()
     try:
         client.list_courses("user", "password", "https://moodle")
@@ -127,7 +135,7 @@ def make_echo_core(tmp_path: Path) -> str:
 
 
 def test_duplicate_actions_send_the_output_folder(tmp_path):
-    client = CoreClient(make_echo_core(tmp_path))
+    client = fake_client(make_echo_core(tmp_path))
 
     found = client.find_duplicates("/descargas")
     removed = client.remove_duplicates("/descargas", ["Materia/a_1.pdf"])
@@ -136,3 +144,14 @@ def test_duplicate_actions_send_the_output_folder(tmp_path):
     assert found["request"]["output_path"] == "/descargas"
     assert removed["request"]["action"] == "remove_duplicates"
     assert removed["request"]["paths"] == ["Materia/a_1.pdf"]
+
+
+def test_core_never_opens_a_console_window_on_windows(tmp_path):
+    client = fake_client(make_fake_core(tmp_path, []))
+    with patch("gui.core_bridge.subprocess.Popen", side_effect=OSError("stop")) as popen, \
+            patch("gui.core_bridge.IS_WINDOWS", True):
+        try:
+            client.list_courses("user", "password", "https://moodle")
+        except Exception:
+            pass
+    assert popen.call_args.kwargs["creationflags"] == CREATE_NO_WINDOW

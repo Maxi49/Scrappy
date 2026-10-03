@@ -24,6 +24,11 @@ class CoreCancelled(CoreError):
 
 CANCEL_GRACE_SECONDS = 5
 
+IS_WINDOWS = os.name == "nt"
+# The packaged app has no console; without this flag Windows opens a console
+# window for the core every time it runs.
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
 
 class CoreClient:
     def __init__(self, core_path: Optional[str] = None):
@@ -150,6 +155,7 @@ class CoreClient:
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
+                creationflags=CREATE_NO_WINDOW if IS_WINDOWS else 0,
             )
         except OSError as exc:
             raise CoreError(f"No se pudo iniciar el núcleo Go: {exc}") from exc
