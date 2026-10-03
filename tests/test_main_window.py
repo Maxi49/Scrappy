@@ -333,3 +333,25 @@ class DrivePanelWiringTest(unittest.TestCase):
             window._start_scraping([], {})
         self.assertEqual(Worker.call_args.kwargs["google_refresh_token"], "RT")
         Worker.return_value.google_session_expired.connect.assert_called_once_with(window._on_google_session_expired)
+
+
+class ErrorHookTest(unittest.TestCase):
+    def setUp(self):
+        self.app = get_app()
+
+    def test_unhandled_errors_are_logged_and_shown_instead_of_aborting(self):
+        from gui.main_window import report_unhandled_error
+
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "scrappy-error.log"
+            try:
+                raise ValueError("algo raro")
+            except ValueError as exc:
+                error = (type(exc), exc, exc.__traceback__)
+            with patch.object(QtWidgets.QMessageBox, "critical") as critical:
+                report_unhandled_error(log, *error)
+            content = log.read_text(encoding="utf-8")
+            self.assertIn("ValueError: algo raro", content)
+            self.assertIn("Traceback", content)
+            critical.assert_called_once()
+            self.assertIn(str(log), critical.call_args.args[2])

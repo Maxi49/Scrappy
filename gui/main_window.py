@@ -1,5 +1,8 @@
+from datetime import datetime
 import json
 from pathlib import Path
+import sys
+import traceback
 from typing import Optional
 
 import keyring
@@ -496,9 +499,33 @@ class ScrappyGUI(QtWidgets.QMainWindow):
                 pass
 
 
+def report_unhandled_error(log_path: Path, exc_type, exc, tb) -> None:
+    """Guarda y muestra un error de la UI que nadie atrapó.
+
+    Sin esto PyQt6 aborta el proceso y el traceback se pierde (la app
+    empaquetada no tiene consola).
+    """
+    detail = "".join(traceback.format_exception(exc_type, exc, tb))
+    if sys.__stderr__ is not None:
+        print(detail, file=sys.__stderr__, flush=True)
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(f"--- {datetime.now().isoformat(timespec='seconds')}\n{detail}\n")
+    except OSError:
+        pass
+    QtWidgets.QMessageBox.critical(
+        None,
+        "Error inesperado",
+        f"Scrappy encontró un error inesperado: {exc}\n\nEl detalle quedó guardado en {log_path}",
+    )
+
+
 def main():
     app = QtWidgets.QApplication([])
     app.setApplicationName(APP_NAME)
+    log_path = user_settings_path().parent / "scrappy-error.log"
+    sys.excepthook = lambda *error: report_unhandled_error(log_path, *error)
     app.setFont(QtGui.QFont("-apple-system", 13))
     window = ScrappyGUI()
     window.show()
