@@ -70,7 +70,7 @@ class ConexionPanel(QtWidgets.QWidget):
         layout.addStretch(); layout.addLayout(h); layout.addStretch()
 
     def _on_connect_clicked(self):
-        u, p = self.username_input.text().strip(), self.password_input.text().strip()
+        u, p = self.username_input.text().strip(), self.password_input.text()
         if u and p:
             self.login_requested.emit(u, p)
 
@@ -89,7 +89,7 @@ class ConexionPanel(QtWidgets.QWidget):
         self.password_input.setText(password)
 
     def get_credentials(self):
-        return self.username_input.text().strip(), self.password_input.text().strip()
+        return self.username_input.text().strip(), self.password_input.text()
 
     def should_remember(self):
         return self.remember_checkbox.isChecked()

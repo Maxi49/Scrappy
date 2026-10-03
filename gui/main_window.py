@@ -28,13 +28,28 @@ PANEL_REGISTRO = 3
 # Seconds to let the Go core save its manifest after a cancel before closing.
 CLOSE_WAIT_MS = 10_000
 
+APP_NAME = "Scrappy"
+# Older builds wrote settings relative to the working directory.
+LEGACY_SETTINGS_PATH = Path("config/user_settings.json")
+
+
+def user_settings_path() -> Path:
+    """Per-user settings file in the OS config folder (independent of the cwd)."""
+    if not QtCore.QCoreApplication.applicationName():
+        QtCore.QCoreApplication.setApplicationName(APP_NAME)
+    location = QtCore.QStandardPaths.writableLocation(
+        QtCore.QStandardPaths.StandardLocation.AppConfigLocation
+    )
+    base = Path(location) if location else Path.home() / ".scrappy"
+    return base / "user_settings.json"
+
 
 class ScrappyGUI(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = Config()
         self._output_path = str(Path.home() / "Downloads")
-        self._settings_path = Path("config/user_settings.json")
+        self._settings_path = user_settings_path()
         self._api_token = ""
         self._username = ""
         self._password = ""
@@ -211,9 +226,12 @@ class ScrappyGUI(QtWidgets.QMainWindow):
 
     def _load_last_output_path(self):
         try:
-            if not self._settings_path.exists():
+            source = self._settings_path
+            if not source.exists():
+                source = LEGACY_SETTINGS_PATH
+            if not source.exists():
                 return
-            with open(self._settings_path, "r", encoding="utf-8") as file:
+            with open(source, "r", encoding="utf-8") as file:
                 last = json.load(file).get("last_output_path")
             if last:
                 self._output_path = last
@@ -267,6 +285,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
 
 def main():
     app = QtWidgets.QApplication([])
+    app.setApplicationName(APP_NAME)
     app.setFont(QtGui.QFont("-apple-system", 13))
     window = ScrappyGUI()
     window.show()

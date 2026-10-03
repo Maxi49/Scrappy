@@ -1,3 +1,7 @@
+import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -95,6 +99,47 @@ class MainWindowWorkflowTest(unittest.TestCase):
             window.closeEvent(event)
         worker.cancel.assert_not_called()
         self.assertFalse(event.isAccepted())
+
+
+
+@patch("keyring.get_password", return_value=None)
+class UserSettingsLocationTest(unittest.TestCase):
+    def setUp(self):
+        from PyQt6 import QtCore
+
+        self.app = get_app()
+        QtCore.QStandardPaths.setTestModeEnabled(True)
+        self.addCleanup(QtCore.QStandardPaths.setTestModeEnabled, False)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        self.addCleanup(os.chdir, self.cwd)
+        from gui.main_window import user_settings_path
+
+        self.settings = user_settings_path()
+        self.settings.unlink(missing_ok=True)
+        self.addCleanup(self.settings.unlink, missing_ok=True)
+
+    def test_settings_live_in_the_os_config_folder_not_the_cwd(self, _get_password):
+        from gui.main_window import ScrappyGUI
+
+        window = ScrappyGUI()
+        window._on_output_path_changed("/tmp/elegida")
+
+        self.assertTrue(self.settings.is_file())
+        self.assertFalse(Path(self.tmp.name, "config", "user_settings.json").exists())
+        self.assertNotEqual(self.settings.parent.resolve(), Path(self.tmp.name).resolve())
+        self.assertEqual(ScrappyGUI()._output_path, "/tmp/elegida")
+
+    def test_legacy_settings_from_the_cwd_are_still_read(self, _get_password):
+        from gui.main_window import ScrappyGUI
+
+        legacy = Path(self.tmp.name, "config", "user_settings.json")
+        legacy.parent.mkdir()
+        legacy.write_text(json.dumps({"last_output_path": "/tmp/vieja"}), encoding="utf-8")
+
+        self.assertEqual(ScrappyGUI()._output_path, "/tmp/vieja")
 
 
 if __name__ == "__main__":

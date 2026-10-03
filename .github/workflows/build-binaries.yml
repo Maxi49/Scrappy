@@ -56,12 +56,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-build.txt
 
-      - name: Run tests
+      - name: Run Go tests
+        shell: bash
+        run: |
+          # The race detector needs cgo; Windows runners may lack a C toolchain.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go test ./...
+          else
+            go test -race ./...
+          fi
+
+      - name: Run Python tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: |
-          go test ./...
-          python -m pytest tests/ -v
+        run: python -m pytest tests/ -v
 
       - name: Build Go core
         run: python scripts/build_core.py

@@ -16,6 +16,25 @@ class ConexionPanelTest(unittest.TestCase):
         panel._on_connect_clicked()
         self.assertEqual(received, [("user", "pass")])
 
+    def test_password_is_sent_exactly_as_typed(self):
+        from gui.panels.conexion import ConexionPanel
+        panel, received = ConexionPanel(), []
+        panel.login_requested.connect(lambda u, p: received.append((u, p)))
+        panel.username_input.setText("  user ")
+        panel.password_input.setText(" clave con espacios ")
+        panel._on_connect_clicked()
+        self.assertEqual(received, [("user", " clave con espacios ")])
+        self.assertEqual(panel.get_credentials(), ("user", " clave con espacios "))
+
+    def test_blank_password_does_not_emit(self):
+        from gui.panels.conexion import ConexionPanel
+        panel, received = ConexionPanel(), []
+        panel.login_requested.connect(lambda u, p: received.append((u, p)))
+        panel.username_input.setText("user")
+        panel.password_input.setText("")
+        panel._on_connect_clicked()
+        self.assertEqual(received, [])
+
     def test_empty_credentials_do_not_emit(self):
         from gui.panels.conexion import ConexionPanel
         panel, received = ConexionPanel(), []

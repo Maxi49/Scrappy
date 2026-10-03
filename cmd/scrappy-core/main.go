@@ -69,33 +69,40 @@ func main() {
 		return
 	}
 
-	out := &emitter{encoder: json.NewEncoder(os.Stdout)}
-	stdin := bufio.NewReader(os.Stdin)
-	decoder := json.NewDecoder(stdin)
+	// The UI may also cancel with a signal; stop cleanly so the manifest keeps
+	// every file that finished before it.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := serve(ctx, os.Stdin, os.Stdout)
+	stop()
+	os.Exit(code)
+}
+
+// serve handles one NDJSON request from stdin, streams progress events and
+// exactly one result event to stdout, and returns the process exit code.
+func serve(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
+	out := &emitter{encoder: json.NewEncoder(stdout)}
+	reader := bufio.NewReader(stdin)
+	decoder := json.NewDecoder(reader)
 	var input request
 	if err := decoder.Decode(&input); err != nil {
 		out.send(map[string]any{"event": "result", "ok": false, "error": "solicitud JSON inválida"})
-		os.Exit(2)
+		return 2
 	}
-	// The UI cancels by terminating the process; stop cleanly so the manifest
-	// keeps every file that finished before the signal.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	if input.CancelOnStdinClose {
-		ctx = cancelOnEOF(ctx, io.MultiReader(decoder.Buffered(), stdin))
+		ctx = cancelOnEOF(ctx, io.MultiReader(decoder.Buffered(), reader))
 	}
 	err := run(ctx, input, out)
-	stop()
-	if err != nil {
-		if errors.Is(err, errResultAlreadySent) {
-			os.Exit(1)
-		}
+	if err == nil {
+		return 0
+	}
+	if !errors.Is(err, errResultAlreadySent) {
 		if ctx.Err() != nil {
 			out.send(map[string]any{"event": "result", "ok": false, "cancelled": true, "error": "operación cancelada"})
-			os.Exit(1)
+		} else {
+			out.send(map[string]any{"event": "result", "ok": false, "error": err.Error()})
 		}
-		out.send(map[string]any{"event": "result", "ok": false, "error": err.Error()})
-		os.Exit(1)
 	}
+	return 1
 }
 
 // cancelOnEOF returns a context that ends when reader reaches EOF or fails.

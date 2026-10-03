@@ -25,3 +25,9 @@ def test_workflow_builds_and_smoke_tests_go_core() -> None:
     assert "python scripts/build_core.py" in workflow
     assert "Contents/Frameworks/scrappy-core --version" in workflow
     assert "_internal/scrappy-core --version" in workflow
+
+
+def test_go_tests_run_with_the_race_detector() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "go test -race ./..." in workflow
