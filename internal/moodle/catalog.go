@@ -202,6 +202,9 @@ func (b *catalogBuilder) addCoreCourse(course Course, sections []courseSection) 
 		if sectionName == "" {
 			sectionName = fmt.Sprintf("Sección %d", section.Section)
 		}
+		b.addSectionDriveLinks(moduleContext{
+			CourseID: course.ID, CourseName: course.Name, SectionName: sectionName, Accessible: true,
+		}, section.Summary)
 		for _, module := range section.Modules {
 			b.diagnostics.Activities++
 			kind := strings.ToLower(strings.TrimSpace(module.ModName))
@@ -456,6 +459,43 @@ func (b *catalogBuilder) addHTMLLinks(ctx moduleContext, body, source string) {
 	}
 }
 
+var (
+	anchorTag  = regexp.MustCompile(`(?is)<a\b([^>]*)>(.*?)</a>`)
+	hrefValue  = regexp.MustCompile(`(?is)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	titleValue = regexp.MustCompile(`(?is)\btitle\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+	htmlTag    = regexp.MustCompile(`(?s)<[^>]*>`)
+)
+
+// addSectionDriveLinks takes the Google Drive links professors put in a
+// section's description, named after the link text. Other links and images in
+// those descriptions are decoration and stay out of the catalog.
+func (b *catalogBuilder) addSectionDriveLinks(ctx moduleContext, summary string) {
+	for _, anchor := range anchorTag.FindAllStringSubmatch(summary, -1) {
+		raw := firstGroup(hrefValue.FindStringSubmatch(anchor[1]))
+		resolved := b.resolveURL(html.UnescapeString(strings.TrimSpace(raw)))
+		if !isHTTP(resolved) || classifyLink(resolved) != ResourceGoogle {
+			continue
+		}
+		name := strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(anchor[2], " "))), " ")
+		if name == "" {
+			name = strings.TrimSpace(html.UnescapeString(firstGroup(titleValue.FindStringSubmatch(anchor[1]))))
+		}
+		if name == "" {
+			name = "Google Drive"
+		}
+		b.addLink(ctx, name, resolved, "section_summary")
+	}
+}
+
+func firstGroup(match []string) string {
+	for index := 1; index < len(match); index++ {
+		if match[index] != "" {
+			return match[index]
+		}
+	}
+	return ""
+}
+
 func (b *catalogBuilder) resolveURL(raw string) string {
 	raw = strings.TrimSpace(html.UnescapeString(raw))
 	if raw == "" || strings.HasPrefix(raw, "@@PLUGINFILE@@") {
@@ -594,6 +634,12 @@ func canonicalURL(raw string) string {
 	if looksLikeMoodleFile(raw) {
 		query := parsed.Query()
 		query.Del("forcedownload")
+		parsed.RawQuery = query.Encode()
+	}
+	if classifyLink(raw) == ResourceGoogle {
+		// usp only records where a Drive link was shared from.
+		query := parsed.Query()
+		query.Del("usp")
 		parsed.RawQuery = query.Encode()
 	}
 	parsed.Fragment = ""

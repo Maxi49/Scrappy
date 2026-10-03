@@ -105,6 +105,7 @@ type courseSection struct {
 	ID      int            `json:"id"`
 	Name    string         `json:"name"`
 	Section int            `json:"section"`
+	Summary string         `json:"summary"`
 	Modules []courseModule `json:"modules"`
 }
 

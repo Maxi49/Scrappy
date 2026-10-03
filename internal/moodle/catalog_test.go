@@ -235,3 +235,38 @@ func TestSameMoodleFileReferencedTwiceIsCatalogedOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestSectionSummariesContributeOnlyTheirGoogleDriveLinks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_ = request.ParseForm()
+		if request.Form.Get("wsfunction") != "core_course_get_contents" {
+			http.Error(response, "unexpected function", http.StatusBadRequest)
+			return
+		}
+		summary := `<p>Bienvenidos <img src="` + serverURL(request) + `/webservice/pluginfile.php/1/banner.png"></p>` +
+			`<p><a style="color:#fff;" href="https://drive.google.com/drive/folders/CATEDRA?usp=sharing"><span>Material de la <b>cátedra</b></span></a></p>` +
+			`<p><a href="https://www.omg.org/spec/BPMN">BPMN</a></p>` +
+			`<p><a title="Repaso" href="https://drive.google.com/drive/folders/CATEDRA"></a></p>`
+		writeJSON(t, response, []any{
+			map[string]any{"id": 1, "name": "Presentación", "section": 1, "summary": summary, "modules": []any{}},
+			map[string]any{"id": 2, "name": "Unidad I", "section": 2,
+				"summary": `<a href="https://drive.google.com/drive/folders/CATEDRA">otra vez</a>`, "modules": []any{}},
+		})
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Discover(context.Background(), client, []Course{{ID: 7, Name: "Sistemas"}}, SiteInfo{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Resources) != 1 {
+		t.Fatalf("resources = %+v", catalog.Resources)
+	}
+	link := catalog.Resources[0]
+	if link.Type != ResourceGoogle || link.Name != "Material de la cátedra" || link.ModuleName != "Presentación" || !link.Accessible {
+		t.Fatalf("link = %+v", link)
+	}
+}
