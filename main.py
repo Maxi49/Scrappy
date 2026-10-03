@@ -48,6 +48,13 @@ def main_cli():
     """Función principal para modo CLI"""
     args = build_parser().parse_args()
 
+    # En Windows la salida redirigida usa cp1252 y no admite el banner ni las
+    # marcas de progreso. En la build sin consola un error ahí abre un diálogo
+    # modal y la CLI queda colgada, así que se reemplazan esos caracteres.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     # Banner
     print("""
     ╔══════════════════════════════════════════════════════════╗
