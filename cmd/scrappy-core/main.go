@@ -30,6 +30,10 @@ type request struct {
 	Export     *bool           `json:"export"`
 	Courses    []courseRequest `json:"courses"`
 	Paths      []string        `json:"paths"`
+	// GoogleRefreshToken is the student's Drive session, read from the keyring
+	// by the UI. It only travels over stdin.
+	GoogleRefreshToken string            `json:"google_refresh_token"`
+	Rules              map[string]string `json:"rules"`
 	// CancelOnStdinClose makes the caller's stdin the cancel switch: closing
 	// it (or the caller dying) stops the operation. Works on every platform,
 	// unlike signals, which Windows cannot deliver to a console-less child.
@@ -159,6 +163,16 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "refresh_token": login.RefreshToken, "email": login.Email})
 		return nil
 
+	case "drive_selection_save":
+		if strings.TrimSpace(input.OutputPath) == "" {
+			return errors.New("falta la carpeta de salida")
+		}
+		if err := gdrive.SaveSelection(input.OutputPath, gdrive.Selection{Rules: input.Rules}); err != nil {
+			return err
+		}
+		out.send(map[string]any{"event": "result", "ok": true})
+		return nil
+
 	case "courses":
 		out.progress("Autenticando con Moodle...")
 		courses, info, err := moodle.ListCourses(ctx, client, input.Username, input.Password)
@@ -171,7 +185,7 @@ func run(ctx context.Context, input request, out *emitter) error {
 		})
 		return nil
 
-	case "sync", "diagnose":
+	case "sync", "diagnose", "drive_scan":
 		info, err := authenticateAndInfo(ctx, client, input.Username, input.Password)
 		if err != nil {
 			return err
@@ -196,9 +210,52 @@ func run(ctx context.Context, input request, out *emitter) error {
 			})
 			return nil
 		}
-		report, syncErr := syncer.Run(ctx, client, catalog, syncer.Options{
+		if strings.TrimSpace(input.OutputPath) == "" {
+			return errors.New("falta la carpeta de salida")
+		}
+		creds := gdrive.AppCredentials()
+		session := gdrive.NewTokenSource(creds, input.GoogleRefreshToken)
+		drive := gdrive.NewClient(creds, session)
+		selection, err := gdrive.LoadSelection(input.OutputPath)
+		if err != nil {
+			out.progress("⚠ " + err.Error() + "; no se descarga nada de Drive hasta revisarlo en el panel Drive.")
+		}
+		previous, err := gdrive.LoadTree(input.OutputPath)
+		if err != nil {
+			return err
+		}
+		expansion, err := gdrive.Expand(ctx, drive, catalog, gdrive.ExpandOptions{
+			Selection: selection, Previous: previous, Full: input.Action == "drive_scan", Progress: out.progress,
+		})
+		if err != nil {
+			return err
+		}
+		courseIDs := make([]int, 0, len(courses))
+		for _, course := range courses {
+			courseIDs = append(courseIDs, course.ID)
+		}
+		tree := gdrive.MergeTree(previous, expansion.Tree, courseIDs)
+		if err := gdrive.SaveTree(input.OutputPath, tree); err != nil {
+			return fmt.Errorf("guardar árbol de Drive: %w", err)
+		}
+		if input.Action == "drive_scan" {
+			out.send(map[string]any{
+				"event": "result", "ok": true, "tree": tree, "rules": selection.Rules,
+				"google_auth_expired": session.Expired(),
+			})
+			return nil
+		}
+		failures := make([]syncer.Failure, 0, len(expansion.Failures))
+		for _, failure := range expansion.Failures {
+			failures = append(failures, syncer.Failure{
+				Course: failure.Course, Module: failure.Module, Resource: failure.Resource, Error: failure.Error,
+			})
+		}
+		report, syncErr := syncer.Run(ctx, client, expansion.Catalog, syncer.Options{
 			OutputPath: input.OutputPath, Modes: modes, Progress: out.progress,
 			WriteIndexes: input.Export == nil || *input.Export,
+			Fetcher:      gdrive.Fetcher{Client: drive}, ExtraFailures: failures,
+			DriveUnreviewed: expansion.Unreviewed, AuthExpired: session.Expired,
 		})
 		if syncErr != nil {
 			out.send(map[string]any{
@@ -210,7 +267,7 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "report": report})
 		return nil
 	default:
-		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates, remove_duplicates o google_login")
+		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates, remove_duplicates, google_login, drive_scan o drive_selection_save")
 	}
 }
 

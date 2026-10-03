@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,22 @@ type Options struct {
 	Workers      int
 	Progress     moodle.ProgressFunc
 	WriteIndexes bool
+
+	// Fetcher downloads resources that come from Google Drive.
+	Fetcher Fetcher
+	// ExtraFailures are problems found before downloading (e.g. unreadable
+	// Drive links) that belong in this run's report.
+	ExtraFailures   []Failure
+	DriveUnreviewed int
+	// AuthExpired reports, once downloads finish, whether Google rejected the
+	// student's session during the run.
+	AuthExpired func() bool
+}
+
+// Fetcher opens a non-Moodle download. The size is the expected length, or
+// zero when unknown.
+type Fetcher interface {
+	Open(ctx context.Context, resource moodle.Resource) (io.ReadCloser, int64, error)
 }
 
 type Failure struct {
@@ -43,18 +60,21 @@ type Failure struct {
 }
 
 type Report struct {
-	StartedAt    string             `json:"started_at"`
-	FinishedAt   string             `json:"finished_at"`
-	Discovered   int                `json:"discovered"`
-	Downloaded   int                `json:"downloaded"`
-	LinksSaved   int                `json:"links_saved"`
-	Unchanged    int                `json:"unchanged"`
-	Skipped      int                `json:"skipped"`
-	Inaccessible int                `json:"inaccessible"`
-	Failed       int                `json:"failed"`
-	Cancelled    bool               `json:"cancelled,omitempty"`
-	Failures     []Failure          `json:"failures,omitempty"`
-	Diagnostics  moodle.Diagnostics `json:"api_diagnostics"`
+	StartedAt    string    `json:"started_at"`
+	FinishedAt   string    `json:"finished_at"`
+	Discovered   int       `json:"discovered"`
+	Downloaded   int       `json:"downloaded"`
+	LinksSaved   int       `json:"links_saved"`
+	Unchanged    int       `json:"unchanged"`
+	Skipped      int       `json:"skipped"`
+	Inaccessible int       `json:"inaccessible"`
+	Failed       int       `json:"failed"`
+	Cancelled    bool      `json:"cancelled,omitempty"`
+	Failures     []Failure `json:"failures,omitempty"`
+
+	DriveUnreviewed   int                `json:"drive_unreviewed,omitempty"`
+	GoogleAuthExpired bool               `json:"google_auth_expired,omitempty"`
+	Diagnostics       moodle.Diagnostics `json:"api_diagnostics"`
 }
 
 type job struct {
@@ -102,6 +122,11 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 			Course: failure.Course, Error: "no se pudo analizar la materia: " + failure.Error,
 		})
 	}
+	for _, failure := range options.ExtraFailures {
+		report.Failed++
+		report.Failures = append(report.Failures, failure)
+	}
+	report.DriveUnreviewed = options.DriveUnreviewed
 	destinations := planDestinations(catalog.Resources, manifest)
 	jobs := make([]job, 0, len(catalog.Resources))
 
@@ -152,6 +177,8 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 				if current.resource.IsLink() {
 					status = "link"
 					size, err = writeShortcut(current.destination, current.resource.URL)
+				} else if current.resource.Drive != nil {
+					size, err = fetchFile(ctx, options.Fetcher, current.resource, current.destination)
 				} else {
 					size, err = downloadFile(ctx, client, current.resource, current.destination)
 				}
@@ -216,6 +243,9 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 		return report, fmt.Errorf("guardar manifiesto: %w", err)
 	}
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	if options.AuthExpired != nil {
+		report.GoogleAuthExpired = options.AuthExpired()
+	}
 	report.Cancelled = ctx.Err() != nil
 	if err := writeExports(outputPath, catalog.Resources, report, options.WriteIndexes); err != nil {
 		return report, fmt.Errorf("exportar resultados: %w", err)

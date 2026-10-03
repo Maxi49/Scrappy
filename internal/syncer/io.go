@@ -69,6 +69,49 @@ func downloadFile(ctx context.Context, client *moodle.Client, resource moodle.Re
 	return 0, lastErr
 }
 
+// fetchFile downloads through a Fetcher with the same atomic write and retry
+// policy as Moodle downloads.
+func fetchFile(ctx context.Context, fetcher Fetcher, resource moodle.Resource, destination string) (int64, error) {
+	if fetcher == nil {
+		return 0, errors.New("Google Drive no está disponible en esta ejecución")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return 0, err
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(time.Duration(1<<(attempt-1)) * 250 * time.Millisecond):
+			}
+		}
+		body, size, err := fetcher.Open(ctx, resource)
+		if err != nil {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+		expected := resource.Size
+		if expected <= 0 && size > 0 {
+			expected = size
+		}
+		written, err := copyAtomically(destination, body, expected)
+		body.Close()
+		if err == nil {
+			return written, nil
+		}
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		lastErr = err
+	}
+	return 0, lastErr
+}
+
 func writeShortcut(destination, rawURL string) (int64, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -156,4 +199,10 @@ func redactURLError(err error) error {
 		urlErr.URL = "(URL omitida)"
 	}
 	return err
+}
+
+// AtomicWrite replaces destination with content without ever leaving a
+// half-written file behind.
+func AtomicWrite(destination string, content []byte, mode os.FileMode) error {
+	return atomicWrite(destination, content, mode)
 }

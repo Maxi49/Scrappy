@@ -41,9 +41,21 @@ type Resource struct {
 	Source       string       `json:"fuente"`
 	Accessible   bool         `json:"accesible"`
 
+	// Drive is set on files listed from a Google Drive link; they download
+	// through the Drive fetcher instead of Moodle.
+	Drive *DriveRef `json:"-"`
+
 	// embedded marks a file found only as a link inside HTML. The activity
 	// that actually owns the file wins when both describe the same file.
 	embedded bool
+}
+
+// DriveRef tells the Drive fetcher how to download one file.
+type DriveRef struct {
+	FileID      string
+	ResourceKey string
+	ExportMIME  string // empty for regular files
+	UseOAuth    bool
 }
 
 func (r Resource) IsLink() bool {

@@ -468,6 +468,9 @@ func (b *catalogBuilder) resolveURL(raw string) string {
 	return b.baseURL.ResolveReference(parsed).String()
 }
 
+// ClassifyFile picks the resource type from the file extension.
+func ClassifyFile(filename string) ResourceType { return classifyFile(filename) }
+
 func classifyFile(filename string) ResourceType {
 	lower := strings.ToLower(filename)
 	switch path.Ext(lower) {
@@ -508,6 +511,9 @@ func flexibleBool(value any, fallback bool) bool {
 		return fallback
 	}
 }
+
+// StableID derives a resource ID that survives catalog reordering.
+func StableID(identity string) string { return stableID(identity) }
 
 func stableID(identity string) string {
 	hash := sha256.Sum256([]byte(identity))
