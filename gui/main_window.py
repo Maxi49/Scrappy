@@ -456,12 +456,15 @@ class ScrappyGUI(QtWidgets.QMainWindow):
 
     def _update_settings(self, **changes):
         """Merges changes into the settings file; None removes a key."""
-        settings = self._read_settings()
+        current = self._read_settings()
+        settings = dict(current)
         for key, value in changes.items():
             if value is None:
                 settings.pop(key, None)
             else:
                 settings[key] = value
+        if settings == current:
+            return
         try:
             self._settings_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._settings_path, "w", encoding="utf-8") as file:

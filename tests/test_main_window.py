@@ -429,3 +429,26 @@ class RememberCredentialsTest(unittest.TestCase):
             self._connect(window)
         window._on_output_path_changed("/tmp/otra")
         self.assertEqual(self._settings(), {"last_output_path": "/tmp/otra", "last_username": "2502564"})
+
+
+def test_tests_never_reach_the_real_keychain_or_preferences():
+    import keyring
+    from conftest import MemoryKeyring
+    from PyQt6 import QtCore
+
+    assert isinstance(keyring.get_keyring(), MemoryKeyring)
+    location = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.AppConfigLocation)
+    assert "qttest" in location.lower()
+
+
+def test_forgetting_nothing_does_not_rewrite_settings(tmp_path, monkeypatch):
+    get_app()
+    from gui.main_window import ScrappyGUI, user_settings_path
+
+    monkeypatch.chdir(tmp_path)  # no legacy config/ to migrate
+    path = user_settings_path()
+    path.unlink(missing_ok=True)
+    with patch("keyring.get_password", return_value=None):
+        window = ScrappyGUI()
+    window._clear_saved_credentials()
+    assert not path.exists()
