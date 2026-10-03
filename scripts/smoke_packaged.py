@@ -22,11 +22,16 @@ USERNAME = "alumno"
 PASSWORD = "clave de prueba"
 COURSES = {1: "Álgebra", 2: "Física I"}
 FILES_PER_COURSE = 2
+TIMEOUT_SECONDS = 120
 
 
 class FakeMoodle(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def log_request(self, code="-", size="-"):
+        # Shows how far the app got if it stalls; the query (token) is dropped.
+        print(f"[fake-moodle] {self.command} {urlparse(self.path).path} -> {code}", flush=True)
 
     def _json(self, body) -> None:
         payload = json.dumps(body).encode("utf-8")
@@ -104,26 +109,44 @@ def main() -> int:
             "UCC_PASSWORD": PASSWORD,
             "QT_QPA_PLATFORM": "offscreen",
             "PYTHONIOENCODING": "utf-8",
+            "PYTHONUNBUFFERED": "1",
         }
         # Keep only what an OS needs to start a process, like a fresh login.
         for name in ("HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA"):
             if name in os.environ:
                 env[name] = os.environ[name]
-        completed = subprocess.run(
+        lines: list[str] = []
+        process = subprocess.Popen(
             [str(executable), "--output", output],
             env=env,
             cwd=tempfile.gettempdir(),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=300,
         )
+
+        def pump() -> None:
+            assert process.stdout is not None
+            for line in process.stdout:
+                lines.append(line)
+                print(f"[app] {line.rstrip()}", flush=True)
+
+        reader = threading.Thread(target=pump, daemon=True)
+        reader.start()
+        try:
+            returncode = process.wait(timeout=TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            server.shutdown()
+            print(f"FAIL: app still running after {TIMEOUT_SECONDS}s", file=sys.stderr)
+            return 1
+        reader.join(timeout=10)
         server.shutdown()
-        print(completed.stdout[-3000:])
-        if completed.returncode != 0:
-            print(completed.stderr[-3000:], file=sys.stderr)
-            print(f"FAIL: exit code {completed.returncode}", file=sys.stderr)
+        if returncode != 0:
+            print(f"FAIL: exit code {returncode}", file=sys.stderr)
             return 1
 
         expected = {
