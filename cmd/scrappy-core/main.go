@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/Maxi49/Scrappy/internal/gdrive"
 	"github.com/Maxi49/Scrappy/internal/moodle"
 	"github.com/Maxi49/Scrappy/internal/syncer"
 )
@@ -147,6 +148,17 @@ func run(ctx context.Context, input request, out *emitter) error {
 		})
 		return nil
 
+	case "google_login":
+		out.progress("Esperando la autorización de Google en el navegador...")
+		login, err := gdrive.Login(ctx, gdrive.AppCredentials(), func(consent string) {
+			out.send(map[string]any{"event": "open_url", "url": consent})
+		})
+		if err != nil {
+			return err
+		}
+		out.send(map[string]any{"event": "result", "ok": true, "refresh_token": login.RefreshToken, "email": login.Email})
+		return nil
+
 	case "courses":
 		out.progress("Autenticando con Moodle...")
 		courses, info, err := moodle.ListCourses(ctx, client, input.Username, input.Password)
@@ -198,7 +210,7 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "report": report})
 		return nil
 	default:
-		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates o remove_duplicates")
+		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates, remove_duplicates o google_login")
 	}
 }
 

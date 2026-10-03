@@ -155,3 +155,18 @@ def test_core_never_opens_a_console_window_on_windows(tmp_path):
         except Exception:
             pass
     assert popen.call_args.kwargs["creationflags"] == CREATE_NO_WINDOW
+
+
+def test_google_login_opens_consent_url_and_returns_session(tmp_path):
+    core = make_fake_core(
+        tmp_path,
+        [
+            {"event": "progress", "message": "Esperando"},
+            {"event": "open_url", "url": "https://accounts.google.com/o/oauth2/v2/auth?x=1"},
+            {"event": "result", "ok": True, "refresh_token": "RT", "email": "a@ucc.edu.ar"},
+        ],
+    )
+    opened = []
+    result = fake_client(core).google_login(open_url=opened.append)
+    assert opened == ["https://accounts.google.com/o/oauth2/v2/auth?x=1"]
+    assert result == {"refresh_token": "RT", "email": "a@ucc.edu.ar"}

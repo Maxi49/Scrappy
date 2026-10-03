@@ -39,3 +39,10 @@ def test_every_packaged_app_downloads_end_to_end() -> None:
     assert "python scripts/smoke_packaged.py packaged-check/Scrappy.app/Contents/MacOS/Scrappy" in workflow
     assert "python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy\n" in workflow
     assert "python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy.exe" in workflow
+
+
+def test_core_build_receives_google_credentials_from_secrets() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    for name in ("SCRAPPY_GOOGLE_API_KEY", "SCRAPPY_GOOGLE_CLIENT_ID", "SCRAPPY_GOOGLE_CLIENT_SECRET"):
+        assert f"{name}: ${{{{ secrets.{name} }}}}" in workflow

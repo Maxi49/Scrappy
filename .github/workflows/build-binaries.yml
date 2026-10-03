@@ -72,6 +72,10 @@ jobs:
         run: python -m pytest tests/ -v
 
       - name: Build Go core
+        env:
+          SCRAPPY_GOOGLE_API_KEY: ${{ secrets.SCRAPPY_GOOGLE_API_KEY }}
+          SCRAPPY_GOOGLE_CLIENT_ID: ${{ secrets.SCRAPPY_GOOGLE_CLIENT_ID }}
+          SCRAPPY_GOOGLE_CLIENT_SECRET: ${{ secrets.SCRAPPY_GOOGLE_CLIENT_SECRET }}
         run: python scripts/build_core.py
 
       - name: Build app

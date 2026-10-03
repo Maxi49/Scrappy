@@ -141,3 +141,24 @@ class DuplicatesWorker(QtCore.QThread):
             self.finished.emit(True, result, "")
         except Exception as exc:
             self.finished.emit(False, {}, str(exc))
+
+
+class GoogleLoginWorker(QtCore.QThread):
+    """Conecta la cuenta de Google vía el núcleo Go (flujo OAuth en el navegador)."""
+
+    consent_url = QtCore.pyqtSignal(str)
+    finished = QtCore.pyqtSignal(bool, dict, str)
+
+    def __init__(self):
+        super().__init__()
+        self._client = CoreClient()
+
+    def cancel(self):
+        self._client.cancel()
+
+    def run(self):
+        try:
+            session = self._client.google_login(open_url=self.consent_url.emit)
+            self.finished.emit(True, session, "")
+        except Exception as exc:
+            self.finished.emit(False, {}, str(exc))

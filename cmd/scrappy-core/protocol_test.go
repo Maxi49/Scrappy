@@ -269,3 +269,54 @@ func TestDuplicateActionsFindAndRemoveIdenticalCopies(t *testing.T) {
 		t.Fatal("a copy with different content was removed")
 	}
 }
+
+// lineWatcher passes each stdout line to onLine as it is written, so a test
+// can react to events (like a browser would) while serve is still running.
+type lineWatcher struct {
+	buffer bytes.Buffer
+	onLine func(map[string]any)
+	seen   int
+}
+
+func (w *lineWatcher) Write(p []byte) (int, error) {
+	n, err := w.buffer.Write(p)
+	lines := strings.Split(w.buffer.String(), "\n")
+	for ; w.seen < len(lines)-1; w.seen++ {
+		var event map[string]any
+		if json.Unmarshal([]byte(lines[w.seen]), &event) == nil {
+			w.onLine(event)
+		}
+	}
+	return n, err
+}
+
+func TestGoogleLoginShowsConsentURLAndStopsWhenCancelled(t *testing.T) {
+	t.Setenv("SCRAPPY_GOOGLE_CLIENT_ID", "CID")
+	t.Setenv("SCRAPPY_GOOGLE_CLIENT_SECRET", "CSECRET")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var consent string
+	watcher := &lineWatcher{onLine: func(event map[string]any) {
+		if event["event"] == "open_url" {
+			consent, _ = event["url"].(string)
+			cancel()
+		}
+	}}
+	code := serve(ctx, strings.NewReader(requestJSON(t, map[string]any{"action": "google_login"})), watcher)
+	if code != 1 || !strings.Contains(consent, "client_id=CID") || !strings.Contains(consent, "code_challenge=") {
+		t.Fatalf("code = %d, consent = %q\n%s", code, consent, watcher.buffer.String())
+	}
+	if !strings.Contains(watcher.buffer.String(), `"cancelled":true`) {
+		t.Fatalf("expected a cancelled result:\n%s", watcher.buffer.String())
+	}
+}
+
+func TestGoogleLoginWithoutAppCredentialsFails(t *testing.T) {
+	t.Setenv("SCRAPPY_GOOGLE_CLIENT_ID", "")
+	t.Setenv("SCRAPPY_GOOGLE_CLIENT_SECRET", "")
+	run := serveRequest(t, context.Background(), requestJSON(t, map[string]any{"action": "google_login"}))
+	result := run.result(t)
+	if run.code != 1 || result["ok"] != false || !strings.Contains(result["error"].(string), "Google") {
+		t.Fatalf("result = %v", result)
+	}
+}

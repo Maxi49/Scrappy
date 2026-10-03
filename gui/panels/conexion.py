@@ -1,3 +1,5 @@
+import html
+
 from PyQt6 import QtCore, QtWidgets
 from gui.theme import BG_CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, SUCCESS, ERROR
 
@@ -17,6 +19,9 @@ class StatusDot(QtWidgets.QFrame):
 
 class ConexionPanel(QtWidgets.QWidget):
     login_requested = QtCore.pyqtSignal(str, str)
+    google_connect_requested = QtCore.pyqtSignal()
+    google_cancel_requested = QtCore.pyqtSignal()
+    google_disconnect_requested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,9 +70,80 @@ class ConexionPanel(QtWidgets.QWidget):
         row.addStretch()
         cl.addLayout(row)
 
+        google_card = self._build_google_card()
+
         h = QtWidgets.QHBoxLayout()
         h.addStretch(); h.addWidget(card); h.addStretch()
-        layout.addStretch(); layout.addLayout(h); layout.addStretch()
+        g = QtWidgets.QHBoxLayout()
+        g.addStretch(); g.addWidget(google_card); g.addStretch()
+        layout.addStretch(); layout.addLayout(h); layout.addSpacing(16); layout.addLayout(g); layout.addStretch()
+        self.set_google_state("disconnected")
+
+    def _build_google_card(self):
+        card = QtWidgets.QFrame()
+        card.setStyleSheet(f"QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 8px; }}")
+        card.setMaximumWidth(400)
+        cl = QtWidgets.QVBoxLayout(card)
+        cl.setContentsMargins(32, 20, 32, 20)
+        cl.setSpacing(10)
+
+        title = QtWidgets.QLabel("Google Drive")
+        title.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {TEXT_PRIMARY}; background: transparent; border: none;")
+        cl.addWidget(title)
+
+        row = QtWidgets.QHBoxLayout()
+        self._google_dot = StatusDot()
+        self.google_status_label = QtWidgets.QLabel()
+        self.google_status_label.setWordWrap(True)
+        self.google_status_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; background: transparent; border: none;")
+        row.addWidget(self._google_dot, alignment=QtCore.Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.google_status_label, stretch=1)
+        cl.addLayout(row)
+
+        self.google_link_label = QtWidgets.QLabel()
+        self.google_link_label.setWordWrap(True)
+        self.google_link_label.setOpenExternalLinks(True)
+        self.google_link_label.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.google_link_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; background: transparent; border: none;")
+        self.google_link_label.hide()
+        cl.addWidget(self.google_link_label)
+
+        self.google_btn = QtWidgets.QPushButton()
+        self.google_btn.setMinimumHeight(32)
+        self.google_btn.clicked.connect(self._on_google_clicked)
+        cl.addWidget(self.google_btn)
+        return card
+
+    def _on_google_clicked(self):
+        if self._google_state == "waiting":
+            self.google_cancel_requested.emit()
+        elif self._google_state == "connected":
+            self.google_disconnect_requested.emit()
+        else:
+            self.google_connect_requested.emit()
+
+    def set_google_state(self, state, email="", message=""):
+        """state: disconnected, waiting, connected, expired o error."""
+        self._google_state = state
+        text, dot, button = {
+            "disconnected": ("No conectado. Hace falta solo para carpetas privadas de la UCC.", "disconnected", "Conectar con Google"),
+            "waiting": ("Esperando la autorización en el navegador...", "connecting", "Cancelar"),
+            "connected": (f"Conectado como {email}" if email else "Conectado", "connected", "Desconectar"),
+            "expired": ("Sesión vencida. Volvé a conectar Google.", "error", "Conectar con Google"),
+            "error": (message or "No se pudo conectar Google.", "error", "Conectar con Google"),
+        }[state]
+        self.google_status_label.setText(text)
+        self._google_dot.set_state(dot)
+        self.google_btn.setText(button)
+        if state != "waiting":
+            self.google_link_label.hide()
+
+    def set_google_consent_url(self, url):
+        safe = html.escape(url, quote=True)
+        self.google_link_label.setText(
+            f'Si no se abrió el navegador, <a href="{safe}" style="color:{ACCENT};">abrí este link</a>.<br>{safe}'
+        )
+        self.google_link_label.show()
 
     def _on_connect_clicked(self):
         u, p = self.username_input.text().strip(), self.password_input.text()

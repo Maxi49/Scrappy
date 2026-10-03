@@ -128,3 +128,37 @@ class ScraperWorkerSignalTest(unittest.TestCase):
         self.assertEqual(results, [(False, {}, "no existe")])
 
 if __name__ == "__main__": unittest.main()
+
+
+def test_google_login_worker_relays_consent_url_and_session():
+    from gui.workers import GoogleLoginWorker
+
+    worker = GoogleLoginWorker()
+    urls, finished = [], []
+    worker.consent_url.connect(urls.append)
+    worker.finished.connect(lambda ok, session, error: finished.append((ok, session, error)))
+
+    def fake_login(*, open_url, progress=None):
+        open_url("https://accounts.google.com/x")
+        return {"refresh_token": "RT", "email": "a@ucc.edu.ar"}
+
+    worker._client.google_login = fake_login
+    worker.run()
+    assert urls == ["https://accounts.google.com/x"]
+    assert finished == [(True, {"refresh_token": "RT", "email": "a@ucc.edu.ar"}, "")]
+
+
+def test_google_login_worker_reports_errors():
+    from gui.core_bridge import CoreError
+    from gui.workers import GoogleLoginWorker
+
+    worker = GoogleLoginWorker()
+    finished = []
+    worker.finished.connect(lambda ok, session, error: finished.append((ok, session, error)))
+
+    def fail(*, open_url, progress=None):
+        raise CoreError("Google rechazó el acceso (access_denied)")
+
+    worker._client.google_login = fail
+    worker.run()
+    assert finished == [(False, {}, "Google rechazó el acceso (access_denied)")]

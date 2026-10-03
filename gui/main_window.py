@@ -18,6 +18,7 @@ from gui.workers import (
     STATUS_PARTIAL,
     DuplicatesWorker,
     FetchMateriasWorker,
+    GoogleLoginWorker,
     ScraperWorker,
 )
 from utils.config import Config
@@ -32,6 +33,7 @@ PANEL_DUPLICADOS = 4
 CLOSE_WAIT_MS = 10_000
 
 APP_NAME = "Scrappy"
+GOOGLE_KEYRING_SERVICE = "scrappy_google"
 # Older builds wrote settings relative to the working directory.
 LEGACY_SETTINGS_PATH = Path("config/user_settings.json")
 
@@ -60,11 +62,14 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.worker: Optional[ScraperWorker] = None
         self.fetch_worker: Optional[FetchMateriasWorker] = None
         self.duplicates_worker: Optional[DuplicatesWorker] = None
+        self.google_worker: Optional[GoogleLoginWorker] = None
+        self._google_refresh_token = ""
 
         self._load_last_output_path()
         self._setup_window()
         self._build_ui()
         self._load_saved_credentials()
+        self._load_google_session()
 
     def _setup_window(self):
         self.setWindowTitle("Scrappy · Moodle UCC")
@@ -88,6 +93,9 @@ class ScrappyGUI(QtWidgets.QMainWindow):
 
         self.conexion_panel = ConexionPanel()
         self.conexion_panel.login_requested.connect(self._start_fetch)
+        self.conexion_panel.google_connect_requested.connect(self._start_google_login)
+        self.conexion_panel.google_cancel_requested.connect(self._cancel_google_login)
+        self.conexion_panel.google_disconnect_requested.connect(self._disconnect_google)
         self.materias_panel = MateriasPanel()
         self.materias_panel.start_requested.connect(self._start_scraping)
         self.config_panel = ConfiguracionPanel(self._output_path)
@@ -218,7 +226,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
                 return
         # Stop the Go core and wait for each thread: a QThread destroyed while
         # running crashes the app, and an orphaned core keeps downloading.
-        for worker in (self.worker, self.fetch_worker, self.duplicates_worker):
+        for worker in (self.worker, self.fetch_worker, self.duplicates_worker, self.google_worker):
             if not self._is_running(worker):
                 continue
             try:
@@ -264,6 +272,74 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.duplicados_panel.show_removal(
             result.get("removed") or [], result.get("skipped") or [], int(result.get("bytes") or 0)
         )
+
+    def _start_google_login(self):
+        if self._is_running(self.google_worker):
+            return
+        self.conexion_panel.set_google_state("waiting")
+        self.google_worker = GoogleLoginWorker()
+        self.google_worker.consent_url.connect(self._on_google_consent_url)
+        self.google_worker.finished.connect(self._on_google_login_finished)
+        self.google_worker.start()
+
+    def _cancel_google_login(self):
+        if self._is_running(self.google_worker):
+            self.google_worker.cancel()
+
+    def _on_google_consent_url(self, url: str):
+        self.conexion_panel.set_google_consent_url(url)
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+
+    def _on_google_login_finished(self, ok: bool, session: dict, error: str):
+        refresh_token = str(session.get("refresh_token") or "")
+        if not ok or not refresh_token:
+            if "cancelada" in (error or "").lower():
+                self._show_google_session()
+            else:
+                self.conexion_panel.set_google_state("error", message=error or "No se pudo conectar Google.")
+            return
+        email = str(session.get("email") or "")
+        self._google_refresh_token = refresh_token
+        try:
+            keyring.set_password(GOOGLE_KEYRING_SERVICE, "refresh_token", refresh_token)
+            keyring.set_password(GOOGLE_KEYRING_SERVICE, "email", email)
+        except Exception:
+            pass
+        self._google_email = email
+        self.conexion_panel.set_google_state("connected", email)
+
+    def _forget_google_session(self):
+        self._google_refresh_token = ""
+        self._google_email = ""
+        for key in ("refresh_token", "email"):
+            try:
+                keyring.delete_password(GOOGLE_KEYRING_SERVICE, key)
+            except Exception:
+                pass
+
+    def _disconnect_google(self):
+        self._forget_google_session()
+        self.conexion_panel.set_google_state("disconnected")
+
+    def _on_google_session_expired(self):
+        self._forget_google_session()
+        self.conexion_panel.set_google_state("expired")
+
+    def _show_google_session(self):
+        if self._google_refresh_token:
+            self.conexion_panel.set_google_state("connected", self._google_email)
+        else:
+            self.conexion_panel.set_google_state("disconnected")
+
+    def _load_google_session(self):
+        self._google_email = ""
+        try:
+            self._google_refresh_token = keyring.get_password(GOOGLE_KEYRING_SERVICE, "refresh_token") or ""
+            if self._google_refresh_token:
+                self._google_email = keyring.get_password(GOOGLE_KEYRING_SERVICE, "email") or ""
+        except Exception:
+            self._google_refresh_token = ""
+        self._show_google_session()
 
     def _on_output_path_changed(self, path: str):
         self._output_path = path

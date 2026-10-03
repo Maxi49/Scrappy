@@ -136,11 +136,23 @@ class CoreClient:
             allow_failure=True,
         )
 
+    def google_login(
+        self,
+        *,
+        open_url: Callable[[str], None],
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """Conecta Google: el core pide abrir la página de consentimiento y
+        devuelve el refresh token y el email de la cuenta."""
+        result = self._run({"action": "google_login"}, progress=progress, open_url=open_url)
+        return {"refresh_token": str(result.get("refresh_token", "")), "email": str(result.get("email", ""))}
+
     def _run(
         self,
         payload: dict,
         progress: Optional[Callable[[str], None]] = None,
         allow_failure: bool = False,
+        open_url: Optional[Callable[[str], None]] = None,
     ) -> dict:
         with self._lock:
             if self._cancelled:
@@ -196,6 +208,8 @@ class CoreClient:
                 continue
             if event.get("event") == "progress" and progress:
                 progress(str(event.get("message", "")))
+            elif event.get("event") == "open_url" and open_url:
+                open_url(str(event.get("url", "")))
             elif event.get("event") == "result":
                 result = event
 

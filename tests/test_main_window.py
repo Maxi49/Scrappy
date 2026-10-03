@@ -162,3 +162,74 @@ class UserSettingsLocationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GoogleSessionTest(unittest.TestCase):
+    def setUp(self):
+        self.app = get_app()
+
+    def _window(self, stored=None):
+        from gui.main_window import ScrappyGUI
+
+        stored = stored or {}
+        with patch("keyring.get_password", side_effect=lambda service, key: stored.get((service, key))):
+            return ScrappyGUI()
+
+    def test_stored_google_session_is_shown_on_startup(self):
+        window = self._window({
+            ("scrappy_google", "refresh_token"): "RT",
+            ("scrappy_google", "email"): "alumno@ucc.edu.ar",
+        })
+        self.assertEqual(window._google_refresh_token, "RT")
+        self.assertIn("alumno@ucc.edu.ar", window.conexion_panel.google_status_label.text())
+
+    def test_connecting_google_opens_the_consent_page_and_stores_the_session(self):
+        window = self._window()
+        with patch("gui.main_window.GoogleLoginWorker") as Worker:
+            window.conexion_panel.google_btn.click()
+        Worker.return_value.start.assert_called_once()
+        self.assertEqual(window.conexion_panel.google_btn.text(), "Cancelar")
+
+        with patch.object(QtGui.QDesktopServices, "openUrl") as open_url:
+            window._on_google_consent_url("https://accounts.google.com/x")
+        open_url.assert_called_once()
+        self.assertIn("https://accounts.google.com/x", window.conexion_panel.google_link_label.text())
+
+        with patch("keyring.set_password") as set_password:
+            window._on_google_login_finished(True, {"refresh_token": "RT", "email": "a@ucc.edu.ar"}, "")
+        set_password.assert_any_call("scrappy_google", "refresh_token", "RT")
+        set_password.assert_any_call("scrappy_google", "email", "a@ucc.edu.ar")
+        self.assertEqual(window._google_refresh_token, "RT")
+        self.assertIn("a@ucc.edu.ar", window.conexion_panel.google_status_label.text())
+
+    def test_failed_google_login_shows_the_error(self):
+        window = self._window()
+        window._on_google_login_finished(False, {}, "Google rechazó el acceso (access_denied)")
+        self.assertIn("rechazó", window.conexion_panel.google_status_label.text())
+        self.assertEqual(window._google_refresh_token, "")
+
+    def test_cancelling_google_login_stops_the_worker(self):
+        window = self._window()
+        with patch("gui.main_window.GoogleLoginWorker") as Worker:
+            Worker.return_value.isRunning.return_value = True
+            window.conexion_panel.google_btn.click()
+            window.conexion_panel.google_btn.click()
+        Worker.return_value.cancel.assert_called_once()
+
+    def test_disconnecting_google_forgets_the_session(self):
+        window = self._window({
+            ("scrappy_google", "refresh_token"): "RT",
+            ("scrappy_google", "email"): "alumno@ucc.edu.ar",
+        })
+        with patch("keyring.delete_password") as delete_password:
+            window.conexion_panel.google_btn.click()
+        delete_password.assert_any_call("scrappy_google", "refresh_token")
+        self.assertEqual(window._google_refresh_token, "")
+        self.assertIn("No conectado", window.conexion_panel.google_status_label.text())
+
+    def test_expired_google_session_is_forgotten(self):
+        window = self._window({("scrappy_google", "refresh_token"): "RT"})
+        with patch("keyring.delete_password"):
+            window._on_google_session_expired()
+        self.assertEqual(window._google_refresh_token, "")
+        self.assertIn("vencida", window.conexion_panel.google_status_label.text())
