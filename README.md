@@ -104,11 +104,14 @@ Los modos disponibles son:
 │       ├── archivo.pdf
 │       ├── subcarpeta/archivo.h
 │       └── enlace.url
-├── config/manifest.json
-├── recursos_encontrados.json
-├── recursos_encontrados.txt
-└── sync-report.json
+└── .scrappy/
+    ├── manifest.json
+    ├── recursos_encontrados.json
+    ├── recursos_encontrados.txt
+    └── sync-report.json
 ```
+
+Los archivos internos de Scrappy viven en la carpeta oculta `.scrappy/`, así el destino (por defecto `~/Downloads`) sólo muestra las materias. Si una versión anterior dejó `config/manifest.json` en el destino, se migra automáticamente sin volver a descargar nada.
 
 `manifest.json` sólo marca un recurso como completo después de guardarlo correctamente. En modo actualizar, Scrappy también comprueba que el archivo local siga existiendo y que su tamaño coincida con el informado por Moodle.
 

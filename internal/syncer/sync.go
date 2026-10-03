@@ -15,6 +15,13 @@ import (
 	"github.com/Maxi49/Scrappy/internal/moodle"
 )
 
+// MetadataDir holds Scrappy's own bookkeeping inside the output folder, so the
+// folder (often ~/Downloads) only shows the downloaded courses.
+const MetadataDir = ".scrappy"
+
+// Files that earlier builds wrote directly into the output folder.
+var legacyRootFiles = []string{"sync-report.json", "recursos_encontrados.json", "recursos_encontrados.txt"}
+
 type Mode struct {
 	Name         string `json:"mode"`
 	ScanExisting bool   `json:"scan_existing"`
@@ -77,7 +84,14 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 	if err := os.MkdirAll(outputPath, 0o755); err != nil {
 		return report, fmt.Errorf("crear carpeta de salida: %w", err)
 	}
-	manifestPath := filepath.Join(outputPath, "config", "manifest.json")
+	metadataPath := filepath.Join(outputPath, MetadataDir)
+	if err := os.MkdirAll(metadataPath, 0o755); err != nil {
+		return report, fmt.Errorf("crear carpeta %s: %w", MetadataDir, err)
+	}
+	manifestPath := filepath.Join(metadataPath, "manifest.json")
+	if err := migrateLegacyManifest(outputPath, manifestPath); err != nil {
+		return report, fmt.Errorf("migrar manifiesto: %w", err)
+	}
 	manifest, err := loadManifest(manifestPath)
 	if err != nil {
 		return report, fmt.Errorf("leer manifiesto: %w", err)
@@ -210,9 +224,27 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 		return report, fmt.Errorf("sincronización cancelada: %w", ctx.Err())
 	}
 	if report.Failed > 0 {
-		return report, fmt.Errorf("%d materia(s) o recurso(s) fallaron; ver sync-report.json", report.Failed)
+		return report, fmt.Errorf("%d materia(s) o recurso(s) fallaron; ver %s/sync-report.json", report.Failed, MetadataDir)
 	}
 	return report, nil
+}
+
+// migrateLegacyManifest moves config/manifest.json from earlier builds into
+// MetadataDir so an existing download is recognised instead of fetched again.
+func migrateLegacyManifest(outputPath, manifestPath string) error {
+	legacyDir := filepath.Join(outputPath, "config")
+	legacy := filepath.Join(legacyDir, "manifest.json")
+	if _, err := os.Stat(legacy); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(manifestPath); err == nil {
+		return os.Remove(legacy)
+	}
+	if err := os.Rename(legacy, manifestPath); err != nil {
+		return err
+	}
+	_ = os.Remove(legacyDir) // only succeeds when nothing else lives there
+	return nil
 }
 
 func localEntryValid(outputPath string, entry *ManifestResource, resource moodle.Resource) bool {
@@ -234,12 +266,13 @@ func localEntryValid(outputPath string, entry *ManifestResource, resource moodle
 }
 
 func writeExports(outputPath string, resources []moodle.Resource, report Report, writeIndexes bool) error {
+	metadataPath := filepath.Join(outputPath, MetadataDir)
 	if writeIndexes {
 		resourceJSON, err := json.MarshalIndent(resources, "", "  ")
 		if err != nil {
 			return err
 		}
-		if err := atomicWrite(filepath.Join(outputPath, "recursos_encontrados.json"), resourceJSON, 0o644); err != nil {
+		if err := atomicWrite(filepath.Join(metadataPath, "recursos_encontrados.json"), resourceJSON, 0o644); err != nil {
 			return err
 		}
 		var text strings.Builder
@@ -257,7 +290,7 @@ func writeExports(outputPath string, resources []moodle.Resource, report Report,
 			}
 			text.WriteString("    - " + resource.Name + " [" + string(resource.Type) + "]\n")
 		}
-		if err := atomicWrite(filepath.Join(outputPath, "recursos_encontrados.txt"), []byte(text.String()), 0o644); err != nil {
+		if err := atomicWrite(filepath.Join(metadataPath, "recursos_encontrados.txt"), []byte(text.String()), 0o644); err != nil {
 			return err
 		}
 	}
@@ -265,7 +298,13 @@ func writeExports(outputPath string, resources []moodle.Resource, report Report,
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(outputPath, "sync-report.json"), reportJSON, 0o644)
+	if err := atomicWrite(filepath.Join(metadataPath, "sync-report.json"), reportJSON, 0o644); err != nil {
+		return err
+	}
+	for _, name := range legacyRootFiles {
+		_ = os.Remove(filepath.Join(outputPath, name))
+	}
+	return nil
 }
 
 func strconvItoa(value int) string     { return strconv.Itoa(value) }

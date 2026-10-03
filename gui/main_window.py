@@ -185,7 +185,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
                 self,
                 "Descarga completada con errores",
                 "Se descargó todo lo posible, pero algunas materias o archivos fallaron.\n\n"
-                "El detalle está en el Registro y en sync-report.json.",
+                "El detalle está en el Registro y en .scrappy/sync-report.json.",
             )
             return
 

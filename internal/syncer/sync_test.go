@@ -70,7 +70,7 @@ func TestRunDoesNotMarkFailedDownloadAsComplete(t *testing.T) {
 	if err == nil || report.Failed != 1 {
 		t.Fatalf("report=%#v err=%v", report, err)
 	}
-	manifest, err := loadManifest(filepath.Join(directory, "config", "manifest.json"))
+	manifest, err := loadManifest(filepath.Join(directory, ".scrappy", "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,9 +284,85 @@ func TestCancelledRunKeepsFinishedFilesAndReportsNoFailures(t *testing.T) {
 	if !report.Cancelled || report.Failed != 0 || report.Downloaded != 1 {
 		t.Fatalf("unexpected report: %#v", report)
 	}
-	manifest, _ := loadManifest(filepath.Join(directory, "config", "manifest.json"))
+	manifest, _ := loadManifest(filepath.Join(directory, ".scrappy", "manifest.json"))
 	module := manifest.module(7, "Materia", "Unidad", false)
 	if module == nil || module.Resources["a"] == nil {
 		t.Fatal("the file finished before cancelling was not recorded")
 	}
+}
+
+func TestRunKeepsBookkeepingInsideDotScrappy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte("%PDF"))
+	}))
+	defer server.Close()
+	client, _ := moodle.NewClient(server.URL, "token")
+	resource := moodle.Resource{
+		ID: "a", CourseID: 7, CourseName: "Materia", ModuleName: "Unidad", Name: "guia.pdf",
+		URL: server.URL + "/webservice/pluginfile.php/1/guia.pdf", Type: moodle.ResourcePDF, Size: 4, Accessible: true,
+	}
+	directory := t.TempDir()
+	options := Options{OutputPath: directory, Workers: 1, WriteIndexes: true}
+	if _, err := Run(context.Background(), client, moodle.Catalog{Resources: []moodle.Resource{resource}}, options); err != nil {
+		t.Fatal(err)
+	}
+	if names := dirNames(t, directory); strings.Join(names, ",") != ".scrappy,Materia" {
+		t.Fatalf("output root should only hold courses and .scrappy, got %v", names)
+	}
+	want := "manifest.json,recursos_encontrados.json,recursos_encontrados.txt,sync-report.json"
+	if names := dirNames(t, filepath.Join(directory, ".scrappy")); strings.Join(names, ",") != want {
+		t.Fatalf("unexpected .scrappy contents %v", names)
+	}
+}
+
+func TestRunMigratesLegacyBookkeepingWithoutRedownloading(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests++
+		_, _ = response.Write([]byte("%PDF"))
+	}))
+	defer server.Close()
+	client, _ := moodle.NewClient(server.URL, "token")
+	catalog := moodle.Catalog{Resources: []moodle.Resource{{
+		ID: "a", CourseID: 7, CourseName: "Materia", ModuleName: "Unidad", Name: "guia.pdf",
+		URL: server.URL + "/webservice/pluginfile.php/1/guia.pdf", Type: moodle.ResourcePDF, Size: 4, Accessible: true,
+	}}}
+	directory := t.TempDir()
+	options := Options{OutputPath: directory, Workers: 1, WriteIndexes: true}
+	if _, err := Run(context.Background(), client, catalog, options); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the layout written by earlier Go builds.
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(directory, ".scrappy", "manifest.json"), filepath.Join(directory, "config", "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sync-report.json", "recursos_encontrados.json", "recursos_encontrados.txt"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := Run(context.Background(), client, catalog, options)
+	if err != nil || report.Unchanged != 1 || requests != 1 {
+		t.Fatalf("legacy manifest was not reused: report=%#v requests=%d err=%v", report, requests, err)
+	}
+	if names := dirNames(t, directory); strings.Join(names, ",") != ".scrappy,Materia" {
+		t.Fatalf("legacy bookkeeping was left in the output root: %v", names)
+	}
+}
+
+func dirNames(t *testing.T, directory string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }
