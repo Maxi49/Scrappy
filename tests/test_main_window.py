@@ -442,7 +442,7 @@ def test_tests_never_reach_the_real_keychain_or_preferences():
 
 
 def test_forgetting_nothing_does_not_rewrite_settings(tmp_path, monkeypatch):
-    get_app()
+    app = get_app()  # keep a reference: a collected QApplication aborts Qt
     from gui.main_window import ScrappyGUI, user_settings_path
 
     monkeypatch.chdir(tmp_path)  # no legacy config/ to migrate
