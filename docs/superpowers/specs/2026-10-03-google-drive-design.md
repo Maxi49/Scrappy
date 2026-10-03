@@ -158,11 +158,12 @@ Consecuencias:
 
 ### Árbol (`<output>/.scrappy/drive-tree.json`)
 
-Por materia → link de Moodle (raíz) → carpetas → archivos. Cada nodo: `id`, `name`, `kind` (folder/file), `mime`, `size` (0 si es nativo o desconocido), `modified`, `parent`, y en las raíces `course_id`, `module`, `link_name`, `inaccessible_reason` si no se pudo leer. Incluye `scanned_at`.
+Lista de raíces (una por link de Moodle) con `id`, `course_id`, `materia`, `modulo`, `link_name`, `new`, `oauth`, `error` (motivo si no se pudo leer) y `node`, un árbol anidado: `id`, `name`, `kind` (folder/file/link), `mime`, `size` (0 si es nativo o desconocido), `modified`, `children`. Incluye `scanned_at`. Un `sync` o `drive_scan` reemplaza solo las raíces de las materias que analizó (`MergeTree`).
 
 ### Protocolo
 
 - **`drive_scan`**: mismos campos que `sync` (credenciales de Moodle, `courses`, `output_path`, `google_refresh_token`). Corre `Discover`, lista **todas** las raíces completas, guarda `drive-tree.json` y devuelve `{"event":"result","ok":true,"tree":…,"rules":…,"google_auth_expired":…}`.
+- **`drive_state`**: `{output_path}` → último árbol y reglas guardados, sin red. Lo usa el panel al abrirse, así Python no lee archivos de `.scrappy/`.
 - **`drive_selection_save`**: `{"action":"drive_selection_save","output_path":…,"rules":{…}}`. El core valida y escribe atómicamente.
 - **`sync`**: lista solo las carpetas cuyo estado efectivo es `include` o que son ancestros (según `drive-tree.json`) de una regla `include`. Para las raíces nuevas solo pide los metadatos de la raíz. Actualiza en `drive-tree.json` los subárboles que listó y conserva el resto del snapshot anterior.
 
@@ -172,7 +173,8 @@ Por materia → link de Moodle (raíz) → carpetas → archivos. Cada nodo: `id
 - Raíces nuevas con etiqueta "nuevo". Raíces inaccesibles en gris con el motivo (p. ej. *"Requiere conectar Google"*).
 - Al abrir muestra el último `drive-tree.json` y la fecha de análisis, sin escanear.
 - Pie: *"Seleccionado: 1,3 GB de 9,8 GB"*, botones **Analizar Drive** y **Guardar selección**.
-- La UI calcula las reglas mínimas a partir de los checks (una regla por raíz; más reglas solo donde un hijo difiere de su padre) y las manda con `drive_selection_save`.
+- La UI calcula las reglas mínimas a partir de los checks (una regla por raíz; más reglas solo donde un hijo difiere de su padre) y las manda con `drive_selection_save`. Una carpeta parcialmente marcada conserva su regla anterior (o la última vez que se la marcó/desmarcó entera), así lo que el profe agregue después sigue esa regla.
+- "Analizar Drive" usa las materias marcadas en Materias, o todas si no hay ninguna marcada; requiere estar conectado a Moodle.
 - Salir del panel con cambios sin guardar pide confirmación.
 
 ---
@@ -181,7 +183,7 @@ Por materia → link de Moodle (raíz) → carpetas → archivos. Cada nodo: `id
 
 - **Raíz ilegible:** una sola falla por link, con mensaje accionable:
   - privada y sin sesión: *"Esta carpeta de Drive es privada; conectá Google en Conexión"*;
-  - con sesión pero sin acceso: *"Tu cuenta de Google (x@…) no tiene acceso; ¿es la cuenta de la UCC?"*;
+  - con sesión pero sin acceso: *"Tu cuenta de Google no tiene acceso; ¿es la cuenta de la UCC?"* (el core no conoce el email);
   - sesión vencida: *"La sesión de Google venció; reconectá Google en Conexión"*.
 - **Archivo puntual:** falla normal del reporte; el sync termina en `partial`.
 - **Reporte:** campos nuevos `drive_unreviewed` (raíces nuevas sin revisar) y `google_auth_expired`. Lo descargado de Drive ya aparece en `resources_by_source["google_drive"]`.
