@@ -8,10 +8,7 @@ from gui.core_bridge import CoreClient
 from utils.config import Config
 
 
-def main_cli():
-    """Función principal para modo CLI"""
-
-    # Configurar argumentos de línea de comandos
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Scrappy para Moodle UCC - Descarga recursos de cursos'
     )
@@ -20,12 +17,6 @@ def main_cli():
         '-u',
         type=str,
         help='Usuario de Moodle (si no se proporciona, se pedirá por consola)'
-    )
-    parser.add_argument(
-        '--password',
-        '-p',
-        type=str,
-        help='Contraseña de Moodle (si no se proporciona, se pedirá por consola)'
     )
     parser.add_argument(
         '--headless',
@@ -46,8 +37,16 @@ def main_cli():
         default='output',
         help='Carpeta de destino (por defecto: output)'
     )
+    parser.epilog = (
+        'La contraseña se toma de la variable UCC_PASSWORD o se pide por consola; '
+        'nunca como argumento, porque quedaría visible para otros procesos.'
+    )
+    return parser
 
-    args = parser.parse_args()
+
+def main_cli():
+    """Función principal para modo CLI"""
+    args = build_parser().parse_args()
 
     # Banner
     print("""
@@ -58,7 +57,7 @@ def main_cli():
     """)
 
     username = args.username or os.getenv("UCC_USERNAME", "") or input("Usuario: ").strip()
-    password = args.password or os.getenv("UCC_PASSWORD", "") or getpass.getpass("Contraseña: ")
+    password = os.getenv("UCC_PASSWORD", "") or getpass.getpass("Contraseña: ")
     core = CoreClient()
     try:
         materias, token = core.list_courses(username, password, Config.BASE_URL)

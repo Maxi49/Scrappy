@@ -65,8 +65,10 @@ python main.py
 CLI:
 
 ```bash
-python main.py --username USUARIO --password CONTRASEÑA --output output
+python main.py --username USUARIO --output output
 ```
+
+La contraseña se pide por consola sin mostrarse, o se toma de la variable `UCC_PASSWORD`. No se acepta como argumento porque quedaría visible para otros procesos y en el historial de la terminal.
 
 Si `bin/scrappy-core` no existe durante el desarrollo, el puente usa `go run ./cmd/scrappy-core`. Las builds publicadas siempre incluyen el binario precompilado.
 
