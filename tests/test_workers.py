@@ -100,4 +100,31 @@ class ScraperWorkerSignalTest(unittest.TestCase):
             w.run()
         self.assertEqual(results, [("error", "sin core")])
 
+    def test_duplicates_worker_scans_or_removes(self):
+        from gui.workers import DuplicatesWorker
+        results = []
+        with patch("gui.workers.CoreClient") as Mock:
+            Mock.return_value.find_duplicates.return_value = {"ok": True, "duplicates": [], "bytes": 0}
+            Mock.return_value.remove_duplicates.return_value = {"ok": True, "removed": ["a_1.pdf"]}
+            scan = DuplicatesWorker("/out")
+            scan.finished.connect(lambda *args: results.append(args))
+            scan.run()
+            remove = DuplicatesWorker("/out", ["a_1.pdf"])
+            remove.finished.connect(lambda *args: results.append(args))
+            remove.run()
+        Mock.return_value.find_duplicates.assert_called_once_with("/out")
+        Mock.return_value.remove_duplicates.assert_called_once_with("/out", ["a_1.pdf"])
+        self.assertEqual(results[0][0], True)
+        self.assertEqual(results[1][1]["removed"], ["a_1.pdf"])
+
+    def test_duplicates_worker_reports_errors(self):
+        from gui.workers import DuplicatesWorker
+        results = []
+        with patch("gui.workers.CoreClient") as Mock:
+            Mock.return_value.find_duplicates.side_effect = RuntimeError("no existe")
+            worker = DuplicatesWorker("/out")
+            worker.finished.connect(lambda *args: results.append(args))
+            worker.run()
+        self.assertEqual(results, [(False, {}, "no existe")])
+
 if __name__ == "__main__": unittest.main()

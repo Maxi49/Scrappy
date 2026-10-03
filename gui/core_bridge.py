@@ -89,6 +89,14 @@ class CoreClient:
         courses = [course for course in courses if course.nombre and course.id_curso]
         return courses, str(result.get("token", ""))
 
+    def find_duplicates(self, output_path: str) -> dict:
+        return self._run({"action": "duplicates", "output_path": output_path})
+
+    def remove_duplicates(self, output_path: str, paths: list[str]) -> dict:
+        return self._run(
+            {"action": "remove_duplicates", "output_path": output_path, "paths": list(paths)}
+        )
+
     def sync(
         self,
         *,

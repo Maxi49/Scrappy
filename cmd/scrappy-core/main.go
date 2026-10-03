@@ -28,6 +28,7 @@ type request struct {
 	OutputPath string          `json:"output_path"`
 	Export     *bool           `json:"export"`
 	Courses    []courseRequest `json:"courses"`
+	Paths      []string        `json:"paths"`
 	// CancelOnStdinClose makes the caller's stdin the cancel switch: closing
 	// it (or the caller dying) stops the operation. Works on every platform,
 	// unlike signals, which Windows cannot deliver to a console-less child.
@@ -126,6 +127,26 @@ func run(ctx context.Context, input request, out *emitter) error {
 	}
 
 	switch input.Action {
+	case "duplicates":
+		out.progress("Buscando archivos duplicados...")
+		scan, err := syncer.FindDuplicates(input.OutputPath)
+		if err != nil {
+			return err
+		}
+		out.send(map[string]any{"event": "result", "ok": true, "duplicates": scan.Duplicates, "bytes": scan.Bytes})
+		return nil
+
+	case "remove_duplicates":
+		removal, err := syncer.RemoveDuplicates(input.OutputPath, input.Paths)
+		if err != nil {
+			return err
+		}
+		out.send(map[string]any{
+			"event": "result", "ok": true, "removed": removal.Removed,
+			"skipped": removal.Skipped, "bytes": removal.Bytes,
+		})
+		return nil
+
 	case "courses":
 		out.progress("Autenticando con Moodle...")
 		courses, info, err := moodle.ListCourses(ctx, client, input.Username, input.Password)
@@ -177,7 +198,7 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "report": report})
 		return nil
 	default:
-		return errors.New("acción desconocida; usar courses, diagnose o sync")
+		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates o remove_duplicates")
 	}
 }
 

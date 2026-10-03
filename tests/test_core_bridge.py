@@ -111,3 +111,28 @@ def test_cancelled_course_listing_raises(tmp_path):
     except CoreCancelled:
         return
     raise AssertionError("expected CoreCancelled")
+
+
+def make_echo_core(tmp_path: Path) -> str:
+    script = tmp_path / "echo-core"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'event': 'result', 'ok': True, 'request': request}), flush=True)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_duplicate_actions_send_the_output_folder(tmp_path):
+    client = CoreClient(make_echo_core(tmp_path))
+
+    found = client.find_duplicates("/descargas")
+    removed = client.remove_duplicates("/descargas", ["Materia/a_1.pdf"])
+
+    assert found["request"]["action"] == "duplicates"
+    assert found["request"]["output_path"] == "/descargas"
+    assert removed["request"]["action"] == "remove_duplicates"
+    assert removed["request"]["paths"] == ["Materia/a_1.pdf"]

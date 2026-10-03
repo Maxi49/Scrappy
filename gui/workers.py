@@ -116,3 +116,28 @@ class FetchMateriasWorker(QtCore.QThread):
             self.finished.emit(True, materias, "", token)
         except Exception as exc:
             self.finished.emit(False, [], str(exc), "")
+
+
+class DuplicatesWorker(QtCore.QThread):
+    """Busca duplicados, o borra los indicados en `paths`, vía el núcleo Go."""
+
+    finished = QtCore.pyqtSignal(bool, dict, str)
+
+    def __init__(self, output_path: str, paths: Optional[List[str]] = None):
+        super().__init__()
+        self.output_path = output_path
+        self.paths = paths
+        self._client = CoreClient()
+
+    def cancel(self):
+        self._client.cancel()
+
+    def run(self):
+        try:
+            if self.paths is None:
+                result = self._client.find_duplicates(self.output_path)
+            else:
+                result = self._client.remove_duplicates(self.output_path, self.paths)
+            self.finished.emit(True, result, "")
+        except Exception as exc:
+            self.finished.emit(False, {}, str(exc))

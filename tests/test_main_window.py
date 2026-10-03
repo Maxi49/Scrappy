@@ -22,8 +22,8 @@ class MainWindowTest(unittest.TestCase):
 
         window = ScrappyGUI()
 
-        self.assertEqual(window.stack.count(), 4)
-        self.assertEqual(len(window.sidebar._buttons), 4)
+        self.assertEqual(window.stack.count(), 5)
+        self.assertEqual(len(window.sidebar._buttons), 5)
         self.assertEqual(window.stack.currentIndex(), 0)
 
 
@@ -76,6 +76,24 @@ class MainWindowWorkflowTest(unittest.TestCase):
             window._start_fetch("u", "p")
             window._start_fetch("u", "p")
         self.assertEqual(Worker.call_count, 1)
+
+    def test_duplicate_scan_uses_the_output_folder(self, _get_password):
+        window = self._window()
+        window.config_panel.set_output_path("/tmp/destino")
+        with patch("gui.main_window.DuplicatesWorker") as Worker:
+            Worker.return_value.isRunning.return_value = False
+            window.duplicados_panel.scan_btn.click()
+        Worker.assert_called_once_with("/tmp/destino")
+        Worker.return_value.start.assert_called_once()
+
+    def test_duplicates_are_not_touched_while_syncing(self, _get_password):
+        window = self._window()
+        window.worker = MagicMock()
+        window.worker.isRunning.return_value = True
+        with patch("gui.main_window.DuplicatesWorker") as Worker:
+            window.duplicados_panel.scan_btn.click()
+        Worker.assert_not_called()
+        self.assertIn("descarga", window.duplicados_panel.status_label.text())
 
     def test_closing_during_a_sync_cancels_and_waits(self, _get_password):
         window = self._window()

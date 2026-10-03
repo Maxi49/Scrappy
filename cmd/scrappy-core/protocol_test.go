@@ -235,3 +235,37 @@ func TestStdinEOFOnlyCancelsWhenRequested(t *testing.T) {
 		t.Fatalf("closing stdin did not cancel an opted-in request:\n%s", opted.raw)
 	}
 }
+
+func TestDuplicateActionsFindAndRemoveIdenticalCopies(t *testing.T) {
+	output := t.TempDir()
+	folder := filepath.Join(output, "Materia", "Unidad")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"apunte.pdf": "igual", "apunte_1.pdf": "igual", "apunte_2.pdf": "distinto"} {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	found := serveRequest(t, context.Background(), requestJSON(t, map[string]any{"action": "duplicates", "output_path": output}))
+	result := found.result(t)
+	duplicates, _ := result["duplicates"].([]any)
+	if found.code != 0 || len(duplicates) != 1 || result["bytes"] != float64(5) {
+		t.Fatalf("unexpected scan (code %d): %v", found.code, result)
+	}
+	path := duplicates[0].(map[string]any)["path"]
+
+	removed := serveRequest(t, context.Background(), requestJSON(t, map[string]any{
+		"action": "remove_duplicates", "output_path": output, "paths": []any{path},
+	}))
+	if result := removed.result(t); removed.code != 0 || len(result["removed"].([]any)) != 1 {
+		t.Fatalf("unexpected removal (code %d): %v", removed.code, result)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "apunte_1.pdf")); !os.IsNotExist(err) {
+		t.Fatal("identical copy was not removed")
+	}
+	if _, err := os.Stat(filepath.Join(folder, "apunte_2.pdf")); err != nil {
+		t.Fatal("a copy with different content was removed")
+	}
+}

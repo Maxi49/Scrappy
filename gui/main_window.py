@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from gui.panels.configuracion import ConfiguracionPanel
 from gui.panels.conexion import ConexionPanel
+from gui.panels.duplicados import DuplicadosPanel
 from gui.panels.materias import MateriasPanel
 from gui.panels.registro import RegistroPanel
 from gui.sidebar import Sidebar
@@ -15,6 +16,7 @@ from gui.workers import (
     STATUS_CANCELLED,
     STATUS_OK,
     STATUS_PARTIAL,
+    DuplicatesWorker,
     FetchMateriasWorker,
     ScraperWorker,
 )
@@ -24,6 +26,7 @@ PANEL_CONEXION = 0
 PANEL_MATERIAS = 1
 PANEL_CONFIGURACION = 2
 PANEL_REGISTRO = 3
+PANEL_DUPLICADOS = 4
 
 # Seconds to let the Go core save its manifest after a cancel before closing.
 CLOSE_WAIT_MS = 10_000
@@ -56,6 +59,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self._keyring_service = "scrappy_moodle_ucc"
         self.worker: Optional[ScraperWorker] = None
         self.fetch_worker: Optional[FetchMateriasWorker] = None
+        self.duplicates_worker: Optional[DuplicatesWorker] = None
 
         self._load_last_output_path()
         self._setup_window()
@@ -90,12 +94,17 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.config_panel.output_path_changed.connect(self._on_output_path_changed)
         self.registro_panel = RegistroPanel()
         self.registro_panel.cancel_requested.connect(self._cancel_scraping)
+        self.duplicados_panel = DuplicadosPanel()
+        self.duplicados_panel.set_folder(self._output_path)
+        self.duplicados_panel.scan_requested.connect(self._start_duplicate_scan)
+        self.duplicados_panel.remove_requested.connect(self._start_duplicate_removal)
 
         for panel in (
             self.conexion_panel,
             self.materias_panel,
             self.config_panel,
             self.registro_panel,
+            self.duplicados_panel,
         ):
             self.stack.addWidget(panel)
 
@@ -142,7 +151,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.critical(self, "Error de conexión", error_message)
 
     def _start_scraping(self, materias: list, materia_modes: dict):
-        if self._is_running(self.worker):
+        if self._is_running(self.worker) or self._is_running(self.duplicates_worker):
             return
         self.materias_panel.set_running(True)
         self.registro_panel.clear()
@@ -209,7 +218,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
                 return
         # Stop the Go core and wait for each thread: a QThread destroyed while
         # running crashes the app, and an orphaned core keeps downloading.
-        for worker in (self.worker, self.fetch_worker):
+        for worker in (self.worker, self.fetch_worker, self.duplicates_worker):
             if not self._is_running(worker):
                 continue
             try:
@@ -220,8 +229,45 @@ class ScrappyGUI(QtWidgets.QMainWindow):
             worker.wait(CLOSE_WAIT_MS)
         a0.accept()
 
+    def _run_duplicates_worker(self, paths: Optional[list], busy_text: str):
+        if self._is_running(self.worker):
+            self.duplicados_panel.show_error("Esperá a que termine la descarga en curso.")
+            return
+        if self._is_running(self.duplicates_worker):
+            return
+        output_path = self.config_panel.get_output_path()
+        if paths is None:
+            self.duplicates_worker = DuplicatesWorker(output_path)
+            self.duplicates_worker.finished.connect(self._on_duplicate_scan_finished)
+        else:
+            self.duplicates_worker = DuplicatesWorker(output_path, paths)
+            self.duplicates_worker.finished.connect(self._on_duplicate_removal_finished)
+        self.duplicados_panel.set_busy(True, busy_text)
+        self.duplicates_worker.start()
+
+    def _start_duplicate_scan(self):
+        self._run_duplicates_worker(None, "Buscando duplicados...")
+
+    def _start_duplicate_removal(self, paths: list):
+        self._run_duplicates_worker(paths, "Borrando duplicados...")
+
+    def _on_duplicate_scan_finished(self, ok: bool, result: dict, error: str):
+        if not ok:
+            self.duplicados_panel.show_error(error or "No se pudo buscar duplicados.")
+            return
+        self.duplicados_panel.show_scan(result.get("duplicates") or [], int(result.get("bytes") or 0))
+
+    def _on_duplicate_removal_finished(self, ok: bool, result: dict, error: str):
+        if not ok:
+            self.duplicados_panel.show_error(error or "No se pudieron borrar los duplicados.")
+            return
+        self.duplicados_panel.show_removal(
+            result.get("removed") or [], result.get("skipped") or [], int(result.get("bytes") or 0)
+        )
+
     def _on_output_path_changed(self, path: str):
         self._output_path = path
+        self.duplicados_panel.set_folder(path)
         self._save_last_output_path()
 
     def _load_last_output_path(self):
