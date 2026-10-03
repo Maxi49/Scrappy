@@ -1,7 +1,7 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
 from gui.theme import BG_SIDEBAR, BG_ITEM_ACTIVE, BG_ITEM_HOVER, ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, BORDER
 
-_NAV_ITEMS = [("⚡", "Conexión"), ("⊞", "Materias"), ("⚙", "Configuración"), ("≡", "Registro"), ("⧉", "Duplicados")]
+_NAV_ITEMS = [("⚡", "Conexión"), ("⊞", "Materias"), ("☁", "Drive"), ("⚙", "Configuración"), ("≡", "Registro"), ("⧉", "Duplicados")]
 
 
 class SidebarButton(QtWidgets.QPushButton):

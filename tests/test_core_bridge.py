@@ -170,3 +170,53 @@ def test_google_login_opens_consent_url_and_returns_session(tmp_path):
     result = fake_client(core).google_login(open_url=opened.append)
     assert opened == ["https://accounts.google.com/o/oauth2/v2/auth?x=1"]
     assert result == {"refresh_token": "RT", "email": "a@ucc.edu.ar"}
+
+
+def make_recording_core(tmp_path: Path, result: dict) -> tuple[str, Path]:
+    """Fake core that saves the request it got and answers with result."""
+    script = tmp_path / "recording-core"
+    request_file = tmp_path / "request.json"
+    script.write_text(
+        "import json, sys\n"
+        "request = sys.stdin.readline()\n"
+        f"open({str(request_file)!r}, 'w', encoding='utf-8').write(request)\n"
+        f"print({json.dumps(json.dumps(result))}, flush=True)\n",
+        encoding="utf-8",
+    )
+    return str(script), request_file
+
+
+def test_sync_sends_the_google_session(tmp_path):
+    core, request_file = make_recording_core(tmp_path, {"event": "result", "ok": True, "report": {}})
+    fake_client(core).sync(
+        username="u", password="p", token="t", base_url="https://moodle", output_path=str(tmp_path),
+        materias=[Materia("Materia", "https://moodle/12", "12")], materia_modes={},
+        google_refresh_token="RT",
+    )
+    assert json.loads(request_file.read_text(encoding="utf-8"))["google_refresh_token"] == "RT"
+
+
+def test_drive_scan_sends_courses_and_session(tmp_path):
+    tree = {"scanned_at": "x", "roots": []}
+    core, request_file = make_recording_core(tmp_path, {"event": "result", "ok": True, "tree": tree, "rules": {}})
+    result = fake_client(core).drive_scan(
+        username="u", password="p", token="t", base_url="https://moodle", output_path=str(tmp_path),
+        materias=[Materia("Materia", "https://moodle/12", "12")], google_refresh_token="RT",
+    )
+    request = json.loads(request_file.read_text(encoding="utf-8"))
+    assert request["action"] == "drive_scan"
+    assert request["courses"][0]["id"] == 12
+    assert request["google_refresh_token"] == "RT"
+    assert result["tree"] == tree
+
+
+def test_drive_state_and_selection_save(tmp_path):
+    core, request_file = make_recording_core(tmp_path, {"event": "result", "ok": True, "tree": None, "rules": None})
+    client = fake_client(core)
+    assert client.drive_state(str(tmp_path))["ok"] is True
+    assert json.loads(request_file.read_text(encoding="utf-8"))["action"] == "drive_state"
+    client = fake_client(core)
+    client.save_drive_selection(str(tmp_path), {"ROOT": "include"})
+    request = json.loads(request_file.read_text(encoding="utf-8"))
+    assert request["action"] == "drive_selection_save"
+    assert request["rules"] == {"ROOT": "include"}

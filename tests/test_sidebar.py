@@ -22,8 +22,8 @@ class SidebarTest(unittest.TestCase):
         self.assertTrue(s._buttons[1].isChecked())
         self.assertFalse(s._buttons[0].isChecked())
 
-    def test_sidebar_has_five_buttons(self):
+    def test_sidebar_has_six_buttons(self):
         from gui.sidebar import Sidebar
-        self.assertEqual(len(Sidebar()._buttons), 5)
+        self.assertEqual(len(Sidebar()._buttons), 6)
 
 if __name__ == "__main__": unittest.main()

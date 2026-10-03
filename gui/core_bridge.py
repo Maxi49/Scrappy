@@ -114,6 +114,7 @@ class CoreClient:
         materia_modes: dict,
         export: bool = True,
         progress: Optional[Callable[[str], None]] = None,
+        google_refresh_token: str = "",
     ) -> dict:
         courses = []
         for materia in materias:
@@ -131,9 +132,47 @@ class CoreClient:
                 "output_path": output_path,
                 "export": export,
                 "courses": courses,
+                "google_refresh_token": google_refresh_token,
             },
             progress=progress,
             allow_failure=True,
+        )
+
+    def drive_scan(
+        self,
+        *,
+        username: str,
+        password: str,
+        token: str,
+        base_url: str,
+        output_path: str,
+        materias: Iterable[Materia],
+        google_refresh_token: str = "",
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """Lista el contenido de los links de Drive sin descargar nada."""
+        courses = [materia.to_core({}) for materia in materias]
+        return self._run(
+            {
+                "action": "drive_scan",
+                "base_url": base_url,
+                "username": username,
+                "password": password,
+                "token": token,
+                "output_path": output_path,
+                "courses": courses,
+                "google_refresh_token": google_refresh_token,
+            },
+            progress=progress,
+        )
+
+    def drive_state(self, output_path: str) -> dict:
+        """Último árbol de Drive y selección guardados, sin usar la red."""
+        return self._run({"action": "drive_state", "output_path": output_path})
+
+    def save_drive_selection(self, output_path: str, rules: dict) -> dict:
+        return self._run(
+            {"action": "drive_selection_save", "output_path": output_path, "rules": dict(rules)}
         )
 
     def google_login(

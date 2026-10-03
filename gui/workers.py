@@ -23,6 +23,13 @@ def summarize_report(report: Optional[dict]) -> List[str]:
             part for part in (failure.get("materia"), failure.get("modulo"), failure.get("recurso")) if part
         )
         lines.append(f"  ✗ {where}: {failure.get('error', '')}")
+    unreviewed = int(report.get("drive_unreviewed") or 0)
+    if unreviewed:
+        lines.append(
+            f"  ⚠ {unreviewed} carpetas de Drive nuevas sin revisar; revisalas en el panel Drive."
+        )
+    if report.get("google_auth_expired"):
+        lines.append("  ⚠ La sesión de Google venció; reconectá Google en Conexión.")
     return lines
 
 
@@ -47,6 +54,7 @@ def sync_status(result: dict) -> str:
 class ScraperWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(str, str)
     progress = QtCore.pyqtSignal(str)
+    google_session_expired = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -56,8 +64,10 @@ class ScraperWorker(QtCore.QThread):
         materias: Optional[List[Materia]] = None,
         materia_modes: Optional[dict] = None,
         api_token: str = "",
+        google_refresh_token: str = "",
     ):
         super().__init__()
+        self.google_refresh_token = google_refresh_token
         self.username = username
         self.password = password
         self.output_path = output_path
@@ -80,9 +90,13 @@ class ScraperWorker(QtCore.QThread):
                 materias=self.materias or [],
                 materia_modes=self.materia_modes,
                 progress=lambda msg: self.progress.emit(msg),
+                google_refresh_token=self.google_refresh_token,
             )
-            for line in summarize_report(result.get("report")):
+            report = result.get("report") or {}
+            for line in summarize_report(report):
                 self.progress.emit(line)
+            if report.get("google_auth_expired"):
+                self.google_session_expired.emit()
             status = sync_status(result)
             message = "" if status == STATUS_OK else str(result.get("error") or "Error durante la descarga.")
             self.finished.emit(status, message)
@@ -160,5 +174,59 @@ class GoogleLoginWorker(QtCore.QThread):
         try:
             session = self._client.google_login(open_url=self.consent_url.emit)
             self.finished.emit(True, session, "")
+        except Exception as exc:
+            self.finished.emit(False, {}, str(exc))
+
+
+class DriveWorker(QtCore.QThread):
+    """Acciones del panel Drive vía el núcleo Go: state, scan o save."""
+
+    finished = QtCore.pyqtSignal(bool, dict, str)
+    progress = QtCore.pyqtSignal(str)
+
+    def __init__(
+        self,
+        action: str,
+        *,
+        output_path: str,
+        username: str = "",
+        password: str = "",
+        token: str = "",
+        materias: Optional[List[Materia]] = None,
+        google_refresh_token: str = "",
+        rules: Optional[dict] = None,
+    ):
+        super().__init__()
+        self.action = action
+        self.output_path = output_path
+        self.username = username
+        self.password = password
+        self.token = token
+        self.materias = materias or []
+        self.google_refresh_token = google_refresh_token
+        self.rules = rules or {}
+        self._client = CoreClient()
+
+    def cancel(self):
+        self._client.cancel()
+
+    def run(self):
+        try:
+            if self.action == "state":
+                result = self._client.drive_state(self.output_path)
+            elif self.action == "save":
+                result = self._client.save_drive_selection(self.output_path, self.rules)
+            else:
+                result = self._client.drive_scan(
+                    username=self.username,
+                    password=self.password,
+                    token=self.token,
+                    base_url=Config.BASE_URL,
+                    output_path=self.output_path,
+                    materias=self.materias,
+                    google_refresh_token=self.google_refresh_token,
+                    progress=self.progress.emit,
+                )
+            self.finished.emit(True, result, "")
         except Exception as exc:
             self.finished.emit(False, {}, str(exc))

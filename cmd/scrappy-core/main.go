@@ -163,6 +163,21 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "refresh_token": login.RefreshToken, "email": login.Email})
 		return nil
 
+	case "drive_state":
+		if strings.TrimSpace(input.OutputPath) == "" {
+			return errors.New("falta la carpeta de salida")
+		}
+		tree, err := gdrive.LoadTree(input.OutputPath)
+		if err != nil {
+			return err
+		}
+		selection, err := gdrive.LoadSelection(input.OutputPath)
+		if err != nil {
+			return err
+		}
+		out.send(map[string]any{"event": "result", "ok": true, "tree": tree, "rules": selection.Rules})
+		return nil
+
 	case "drive_selection_save":
 		if strings.TrimSpace(input.OutputPath) == "" {
 			return errors.New("falta la carpeta de salida")
@@ -267,7 +282,7 @@ func run(ctx context.Context, input request, out *emitter) error {
 		out.send(map[string]any{"event": "result", "ok": true, "report": report})
 		return nil
 	default:
-		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates, remove_duplicates, google_login, drive_scan o drive_selection_save")
+		return errors.New("acción desconocida; usar courses, diagnose, sync, duplicates, remove_duplicates, google_login, drive_scan, drive_state o drive_selection_save")
 	}
 }
 

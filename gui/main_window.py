@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from gui.panels.configuracion import ConfiguracionPanel
 from gui.panels.conexion import ConexionPanel
+from gui.panels.drive import DrivePanel
 from gui.panels.duplicados import DuplicadosPanel
 from gui.panels.materias import MateriasPanel
 from gui.panels.registro import RegistroPanel
@@ -16,6 +17,7 @@ from gui.workers import (
     STATUS_CANCELLED,
     STATUS_OK,
     STATUS_PARTIAL,
+    DriveWorker,
     DuplicatesWorker,
     FetchMateriasWorker,
     GoogleLoginWorker,
@@ -25,9 +27,10 @@ from utils.config import Config
 
 PANEL_CONEXION = 0
 PANEL_MATERIAS = 1
-PANEL_CONFIGURACION = 2
-PANEL_REGISTRO = 3
-PANEL_DUPLICADOS = 4
+PANEL_DRIVE = 2
+PANEL_CONFIGURACION = 3
+PANEL_REGISTRO = 4
+PANEL_DUPLICADOS = 5
 
 # Seconds to let the Go core save its manifest after a cancel before closing.
 CLOSE_WAIT_MS = 10_000
@@ -63,6 +66,8 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.fetch_worker: Optional[FetchMateriasWorker] = None
         self.duplicates_worker: Optional[DuplicatesWorker] = None
         self.google_worker: Optional[GoogleLoginWorker] = None
+        self.drive_worker: Optional[DriveWorker] = None
+        self._materias: list = []
         self._google_refresh_token = ""
 
         self._load_last_output_path()
@@ -98,6 +103,9 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.conexion_panel.google_disconnect_requested.connect(self._disconnect_google)
         self.materias_panel = MateriasPanel()
         self.materias_panel.start_requested.connect(self._start_scraping)
+        self.drive_panel = DrivePanel()
+        self.drive_panel.scan_requested.connect(self._start_drive_scan)
+        self.drive_panel.save_requested.connect(self._save_drive_selection)
         self.config_panel = ConfiguracionPanel(self._output_path)
         self.config_panel.output_path_changed.connect(self._on_output_path_changed)
         self.registro_panel = RegistroPanel()
@@ -110,6 +118,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         for panel in (
             self.conexion_panel,
             self.materias_panel,
+            self.drive_panel,
             self.config_panel,
             self.registro_panel,
             self.duplicados_panel,
@@ -123,7 +132,22 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.sidebar.set_active(index)
 
     def _on_nav_changed(self, index: int):
+        current = self.stack.currentIndex()
+        if current == PANEL_DRIVE and index != PANEL_DRIVE and self.drive_panel.is_dirty():
+            if not self._confirm_leave_drive():
+                self.sidebar.set_active(PANEL_DRIVE)
+                return
         self.stack.setCurrentIndex(index)
+        if index == PANEL_DRIVE and current != PANEL_DRIVE:
+            self._load_drive_state()
+
+    def _confirm_leave_drive(self) -> bool:
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Selección sin guardar",
+            "Cambiaste la selección de Drive y no la guardaste. ¿Descartar los cambios?",
+        )
+        return answer == QtWidgets.QMessageBox.StandardButton.Yes
 
     @staticmethod
     def _is_running(worker) -> bool:
@@ -144,6 +168,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.conexion_panel.set_loading(False)
         self._api_token = token
         if success:
+            self._materias = list(materias)
             if self.conexion_panel.should_remember():
                 self._save_credentials()
             else:
@@ -172,7 +197,9 @@ class ScrappyGUI(QtWidgets.QMainWindow):
             materias=materias,
             materia_modes=materia_modes,
             api_token=self._api_token,
+            google_refresh_token=self._google_refresh_token,
         )
+        self.worker.google_session_expired.connect(self._on_google_session_expired)
         self.worker.progress.connect(self.registro_panel.append)
         self.worker.finished.connect(self._on_scraping_finished)
         self.worker.start()
@@ -226,7 +253,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
                 return
         # Stop the Go core and wait for each thread: a QThread destroyed while
         # running crashes the app, and an orphaned core keeps downloading.
-        for worker in (self.worker, self.fetch_worker, self.duplicates_worker, self.google_worker):
+        for worker in (self.worker, self.fetch_worker, self.duplicates_worker, self.google_worker, self.drive_worker):
             if not self._is_running(worker):
                 continue
             try:
@@ -272,6 +299,70 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.duplicados_panel.show_removal(
             result.get("removed") or [], result.get("skipped") or [], int(result.get("bytes") or 0)
         )
+
+    def _run_drive_worker(self, action: str, on_finished, busy_text: str, **kwargs) -> bool:
+        if self._is_running(self.drive_worker):
+            return False
+        self.drive_worker = DriveWorker(action, output_path=self.config_panel.get_output_path(), **kwargs)
+        self.drive_worker.progress.connect(self.drive_panel.show_message)
+        self.drive_worker.finished.connect(on_finished)
+        self.drive_panel.set_busy(True, busy_text)
+        self.drive_worker.start()
+        return True
+
+    def _load_drive_state(self):
+        if self.drive_panel.is_dirty():
+            return
+        self._run_drive_worker("state", self._on_drive_state_loaded, "Cargando el último análisis de Drive...")
+
+    def _on_drive_state_loaded(self, ok: bool, result: dict, error: str):
+        self.drive_panel.set_busy(False)
+        if not ok:
+            self.drive_panel.show_message(f"No se pudo leer el análisis de Drive: {error}")
+            return
+        self.drive_panel.show_tree(result.get("tree"), result.get("rules"))
+
+    def _start_drive_scan(self):
+        if not self._api_token and not (self._username and self._password):
+            self.drive_panel.show_message("Conectate a Moodle primero (panel Conexión) para analizar Drive.")
+            return
+        if self._is_running(self.worker):
+            self.drive_panel.show_message("Esperá a que termine la descarga en curso.")
+            return
+        materias = self.materias_panel.get_selected_materias() or list(self._materias)
+        if not materias:
+            self.drive_panel.show_message("No hay materias para analizar.")
+            return
+        self._run_drive_worker(
+            "scan",
+            self._on_drive_scan_finished,
+            f"Analizando Drive en {len(materias)} materia(s)...",
+            username=self._username,
+            password=self._password,
+            token=self._api_token,
+            materias=materias,
+            google_refresh_token=self._google_refresh_token,
+        )
+
+    def _on_drive_scan_finished(self, ok: bool, result: dict, error: str):
+        self.drive_panel.set_busy(False)
+        if not ok:
+            self.drive_panel.show_message(f"No se pudo analizar Drive: {error}")
+            return
+        if result.get("google_auth_expired"):
+            self._on_google_session_expired()
+        self.drive_panel.show_tree(result.get("tree"), result.get("rules"))
+
+    def _save_drive_selection(self, rules: dict):
+        self._run_drive_worker("save", self._on_drive_saved, "Guardando selección...", rules=rules)
+
+    def _on_drive_saved(self, ok: bool, result: dict, error: str):
+        self.drive_panel.set_busy(False)
+        if not ok:
+            self.drive_panel.show_message(f"No se pudo guardar la selección: {error}")
+            return
+        self.drive_panel.mark_saved()
+        self.drive_panel.show_message("Selección guardada. Se aplica en la próxima descarga.")
 
     def _start_google_login(self):
         if self._is_running(self.google_worker):

@@ -17,13 +17,13 @@ class MainWindowTest(unittest.TestCase):
         self.app = get_app()
 
     @patch("keyring.get_password", return_value=None)
-    def test_main_window_wires_four_panels(self, _get_password):
+    def test_main_window_wires_six_panels(self, _get_password):
         from gui.main_window import ScrappyGUI
 
         window = ScrappyGUI()
 
-        self.assertEqual(window.stack.count(), 5)
-        self.assertEqual(len(window.sidebar._buttons), 5)
+        self.assertEqual(window.stack.count(), 6)
+        self.assertEqual(len(window.sidebar._buttons), 6)
         self.assertEqual(window.stack.currentIndex(), 0)
 
 
@@ -233,3 +233,103 @@ class GoogleSessionTest(unittest.TestCase):
             window._on_google_session_expired()
         self.assertEqual(window._google_refresh_token, "")
         self.assertIn("vencida", window.conexion_panel.google_status_label.text())
+
+
+@patch("keyring.get_password", return_value=None)
+class DrivePanelWiringTest(unittest.TestCase):
+    def setUp(self):
+        self.app = get_app()
+
+    def _window(self):
+        from gui.main_window import ScrappyGUI
+
+        window = ScrappyGUI()
+        window.config_panel.set_output_path("/tmp/destino")
+        return window
+
+    def test_drive_panel_sits_below_materias(self, _get_password):
+        from gui.main_window import PANEL_DRIVE, PANEL_MATERIAS
+
+        window = self._window()
+        self.assertEqual(PANEL_DRIVE, PANEL_MATERIAS + 1)
+        self.assertIs(window.stack.widget(PANEL_DRIVE), window.drive_panel)
+        self.assertIn("Drive", window.sidebar._buttons[PANEL_DRIVE].text())
+
+    def test_opening_the_drive_panel_loads_the_saved_state(self, _get_password):
+        from gui.main_window import PANEL_DRIVE
+
+        window = self._window()
+        with patch("gui.main_window.DriveWorker") as Worker:
+            Worker.return_value.isRunning.return_value = False
+            window.sidebar.navigate_to(PANEL_DRIVE)
+        Worker.assert_called_once_with("state", output_path="/tmp/destino")
+        Worker.return_value.start.assert_called_once()
+
+    def test_scanning_needs_a_moodle_connection(self, _get_password):
+        window = self._window()
+        with patch("gui.main_window.DriveWorker") as Worker:
+            window.drive_panel.scan_btn.click()
+        Worker.assert_not_called()
+        self.assertIn("Conectate", window.drive_panel.status_label.text())
+
+    def test_scanning_uses_the_selected_courses_and_google_session(self, _get_password):
+        from gui.models import Materia
+
+        window = self._window()
+        materias = [Materia("Sistemas", "https://m/1", "1"), Materia("Álgebra", "https://m/2", "2")]
+        window._on_fetch_finished(True, materias, "", "TOKEN")
+        window._google_refresh_token = "RT"
+        with patch.object(window.materias_panel, "get_selected_materias", return_value=[materias[0]]), \
+                patch("gui.main_window.DriveWorker") as Worker:
+            Worker.return_value.isRunning.return_value = False
+            window.drive_panel.scan_btn.click()
+        kwargs = Worker.call_args.kwargs
+        self.assertEqual(Worker.call_args.args, ("scan",))
+        self.assertEqual(kwargs["materias"], [materias[0]])
+        self.assertEqual(kwargs["token"], "TOKEN")
+        self.assertEqual(kwargs["google_refresh_token"], "RT")
+
+    def test_scanning_without_a_course_selection_uses_every_course(self, _get_password):
+        from gui.models import Materia
+
+        window = self._window()
+        materias = [Materia("Sistemas", "https://m/1", "1")]
+        window._on_fetch_finished(True, materias, "", "TOKEN")
+        with patch.object(window.materias_panel, "get_selected_materias", return_value=[]), \
+                patch("gui.main_window.DriveWorker") as Worker:
+            Worker.return_value.isRunning.return_value = False
+            window.drive_panel.scan_btn.click()
+        self.assertEqual(Worker.call_args.kwargs["materias"], materias)
+
+    def test_saving_sends_the_rules_and_marks_the_panel_clean(self, _get_password):
+        window = self._window()
+        with patch("gui.main_window.DriveWorker") as Worker:
+            Worker.return_value.isRunning.return_value = False
+            window.drive_panel.save_requested.emit({"R": "include"})
+        Worker.assert_called_once_with("save", output_path="/tmp/destino", rules={"R": "include"})
+        with patch.object(window.drive_panel, "mark_saved") as mark_saved:
+            window._on_drive_saved(True, {"ok": True}, "")
+        mark_saved.assert_called_once()
+
+    def test_leaving_the_drive_panel_with_unsaved_changes_asks_first(self, _get_password):
+        from gui.main_window import PANEL_DRIVE, PANEL_REGISTRO
+
+        window = self._window()
+        with patch("gui.main_window.DriveWorker"):
+            window.sidebar.navigate_to(PANEL_DRIVE)
+        with patch.object(window.drive_panel, "is_dirty", return_value=True), \
+                patch.object(window, "_confirm_leave_drive", return_value=False):
+            window.sidebar.navigate_to(PANEL_REGISTRO)
+        self.assertEqual(window.stack.currentIndex(), PANEL_DRIVE)
+        with patch.object(window.drive_panel, "is_dirty", return_value=True), \
+                patch.object(window, "_confirm_leave_drive", return_value=True):
+            window.sidebar.navigate_to(PANEL_REGISTRO)
+        self.assertEqual(window.stack.currentIndex(), PANEL_REGISTRO)
+
+    def test_sync_passes_the_google_session_and_handles_expiry(self, _get_password):
+        window = self._window()
+        window._google_refresh_token = "RT"
+        with patch("gui.main_window.ScraperWorker") as Worker:
+            window._start_scraping([], {})
+        self.assertEqual(Worker.call_args.kwargs["google_refresh_token"], "RT")
+        Worker.return_value.google_session_expired.connect.assert_called_once_with(window._on_google_session_expired)

@@ -162,3 +162,64 @@ def test_google_login_worker_reports_errors():
     worker._client.google_login = fail
     worker.run()
     assert finished == [(False, {}, "Google rechazó el acceso (access_denied)")]
+
+
+def test_summary_points_to_unreviewed_drive_links_and_expired_session():
+    from gui.workers import summarize_report
+
+    lines = summarize_report({"downloaded": 1, "drive_unreviewed": 2, "google_auth_expired": True})
+    assert any("2 carpetas de Drive nuevas sin revisar" in line and "panel Drive" in line for line in lines)
+    assert any("sesión de Google venció" in line for line in lines)
+    assert not any("Drive" in line for line in summarize_report({"downloaded": 1}))
+
+
+def test_scraper_worker_passes_the_google_session_and_flags_expiry():
+    from gui.workers import ScraperWorker
+
+    worker = ScraperWorker("u", "p", "/tmp", materias=[], google_refresh_token="RT")
+    calls, expired = [], []
+    worker.google_session_expired.connect(lambda: expired.append(True))
+
+    def fake_sync(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "report": {"google_auth_expired": True}}
+
+    worker._client.sync = fake_sync
+    worker.run()
+    assert calls[0]["google_refresh_token"] == "RT"
+    assert expired == [True]
+
+
+def test_drive_worker_dispatches_each_action():
+    from gui.workers import DriveWorker
+
+    results = []
+    state = DriveWorker("state", output_path="/tmp/x")
+    state._client.drive_state = lambda output_path: {"ok": True, "tree": {"roots": []}, "rules": {}}
+    state.finished.connect(lambda ok, result, error: results.append((ok, result, error)))
+    state.run()
+
+    save = DriveWorker("save", output_path="/tmp/x", rules={"R": "include"})
+    save._client.save_drive_selection = lambda output_path, rules: {"ok": True, "saved": rules}
+    save.finished.connect(lambda ok, result, error: results.append((ok, result, error)))
+    save.run()
+
+    scan = DriveWorker("scan", output_path="/tmp/x", username="u", password="p", token="t", materias=[], google_refresh_token="RT")
+    seen = {}
+
+    def fake_scan(**kwargs):
+        seen.update(kwargs)
+        kwargs["progress"]("Drive: listando")
+        raise RuntimeError("sin red")
+
+    scan._client.drive_scan = fake_scan
+    progress = []
+    scan.progress.connect(progress.append)
+    scan.finished.connect(lambda ok, result, error: results.append((ok, result, error)))
+    scan.run()
+
+    assert results[0][0] is True and results[0][1]["tree"] == {"roots": []}
+    assert results[1] == (True, {"ok": True, "saved": {"R": "include"}}, "")
+    assert results[2] == (False, {}, "sin red")
+    assert seen["google_refresh_token"] == "RT"
+    assert progress == ["Drive: listando"]

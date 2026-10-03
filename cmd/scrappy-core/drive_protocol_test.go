@@ -141,3 +141,20 @@ func TestSyncDownloadsOnlyReviewedDriveLinks(t *testing.T) {
 		t.Fatalf("content = %q, err = %v", content, err)
 	}
 }
+
+func TestDriveStateReturnsTheSavedTreeAndRulesOffline(t *testing.T) {
+	output := t.TempDir()
+	tree := gdrive.Tree{ScannedAt: "2026-10-03T10:00:00Z", Roots: []*gdrive.Root{{ID: "ROOT", CourseID: 1, LinkName: "Material"}}}
+	if err := gdrive.SaveTree(output, tree); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdrive.SaveSelection(output, gdrive.Selection{Rules: map[string]string{"ROOT": "include"}}); err != nil {
+		t.Fatal(err)
+	}
+	run := serveRequest(t, context.Background(), requestJSON(t, map[string]any{"action": "drive_state", "output_path": output}))
+	result := run.result(t)
+	if result["ok"] != true || result["rules"].(map[string]any)["ROOT"] != "include" ||
+		result["tree"].(map[string]any)["scanned_at"] != "2026-10-03T10:00:00Z" {
+		t.Fatalf("result = %v", result)
+	}
+}
