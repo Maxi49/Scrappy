@@ -33,7 +33,7 @@ func downloadFile(ctx context.Context, client *moodle.Client, resource moodle.Re
 		request.Header.Set("User-Agent", "Scrappy/2 Go")
 		response, err := client.HTTPClient().Do(request)
 		if err != nil {
-			lastErr = err
+			lastErr = redactURLError(err)
 		} else {
 			finalPath := ""
 			if response.Request != nil && response.Request.URL != nil {
@@ -140,4 +140,20 @@ func replaceFile(source, destination string) error {
 		return err
 	}
 	return os.Rename(source, destination)
+}
+
+// redactURLError drops the query (which carries the Moodle token) from the URL
+// that net/http embeds in transport errors, since these reach the UI and report.
+func redactURLError(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	if parsed, parseErr := url.Parse(urlErr.URL); parseErr == nil {
+		parsed.RawQuery = ""
+		urlErr.URL = parsed.String()
+	} else {
+		urlErr.URL = "(URL omitida)"
+	}
+	return err
 }

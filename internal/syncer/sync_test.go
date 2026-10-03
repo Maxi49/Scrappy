@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Maxi49/Scrappy/internal/moodle"
@@ -83,7 +84,7 @@ func TestPlanDestinationsPreservesFoldersAndResolvesCollisions(t *testing.T) {
 		{ID: "bbbbbbbb2", CourseName: "Materia", ModuleName: "Unidad", Subfolder: "Pila", Name: "nodo.h"},
 		{ID: "cccccccc3", CourseName: "Materia", ModuleName: "Unidad", Subfolder: "Cola", Name: "nodo.h"},
 	}
-	paths := planDestinations(resources)
+	paths := planDestinations(resources, newManifest())
 	if filepath.Dir(paths["aaaaaaaa1"]) != filepath.Join("Materia", "Unidad", "Pila") {
 		t.Fatalf("nested path lost: %s", paths["aaaaaaaa1"])
 	}
@@ -173,5 +174,73 @@ func TestRerunsNeverCreateDuplicateCopies(t *testing.T) {
 	}
 	if len(names) != 2 {
 		t.Fatalf("expected exactly the 2 Moodle files, got %v", names)
+	}
+}
+
+func TestCollidingFilesKeepTheirPathsWhenCatalogOrderChanges(t *testing.T) {
+	contents := map[string]string{"/webservice/pluginfile.php/1/a": "AAAA", "/webservice/pluginfile.php/2/b": "BBBB"}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte(contents[request.URL.Path]))
+	}))
+	defer server.Close()
+	client, _ := moodle.NewClient(server.URL, "token")
+	file := func(id, path string, modified int64) moodle.Resource {
+		return moodle.Resource{
+			ID: id, CourseID: 7, CourseName: "Materia", ModuleName: "Unidad", Name: "apunte.pdf",
+			URL: server.URL + path, Type: moodle.ResourcePDF, Size: 4, Modified: modified, Accessible: true,
+		}
+	}
+	directory := t.TempDir()
+	run := func(resources ...moodle.Resource) {
+		t.Helper()
+		_, err := Run(context.Background(), client, moodle.Catalog{Resources: resources},
+			Options{OutputPath: directory, Modes: map[int]Mode{7: {Name: "update", ScanExisting: true}}, Workers: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(file("aaaaaaaa1", "/webservice/pluginfile.php/1/a", 1), file("bbbbbbbb2", "/webservice/pluginfile.php/2/b", 1))
+	contents["/webservice/pluginfile.php/2/b"] = "bbbb"
+	run(file("bbbbbbbb2", "/webservice/pluginfile.php/2/b", 2), file("aaaaaaaa1", "/webservice/pluginfile.php/1/a", 1))
+
+	entries, err := os.ReadDir(filepath.Join(directory, "Materia", "Unidad"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, entry := range entries {
+		data, _ := os.ReadFile(filepath.Join(directory, "Materia", "Unidad", entry.Name()))
+		found[string(data)] = true
+	}
+	if len(entries) != 2 || !found["AAAA"] || !found["bbbb"] {
+		t.Fatalf("a colliding file was overwritten: %d files, contents %v", len(entries), found)
+	}
+}
+
+func TestPlanDestinationsDoesNotDependOnCatalogOrder(t *testing.T) {
+	a := moodle.Resource{ID: "aaaaaaaa1", CourseName: "Materia", ModuleName: "Unidad", Name: "nodo.h"}
+	b := moodle.Resource{ID: "bbbbbbbb2", CourseName: "Materia", ModuleName: "Unidad", Name: "nodo.h"}
+	forward := planDestinations([]moodle.Resource{a, b}, newManifest())
+	backward := planDestinations([]moodle.Resource{b, a}, newManifest())
+	if forward["aaaaaaaa1"] != backward["aaaaaaaa1"] || forward["bbbbbbbb2"] != backward["bbbbbbbb2"] {
+		t.Fatalf("paths depend on order: %v vs %v", forward, backward)
+	}
+}
+
+func TestDownloadErrorsNeverExposeTheToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := server.URL
+	server.Close()
+	client, _ := moodle.NewClient(base, "secret-moodle-token")
+	resource := moodle.Resource{
+		ID: "r", CourseID: 7, CourseName: "Materia", ModuleName: "Unidad", Name: "guia.pdf",
+		URL: base + "/webservice/pluginfile.php/1/guia.pdf", Type: moodle.ResourcePDF, Accessible: true,
+	}
+	_, err := downloadFile(context.Background(), client, resource, filepath.Join(t.TempDir(), "guia.pdf"))
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if strings.Contains(err.Error(), "secret-moodle-token") {
+		t.Fatalf("token leaked into error: %v", err)
 	}
 }

@@ -87,7 +87,7 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 			Course: failure.Course, Error: "no se pudo analizar la materia: " + failure.Error,
 		})
 	}
-	destinations := planDestinations(catalog.Resources)
+	destinations := planDestinations(catalog.Resources, manifest)
 	jobs := make([]job, 0, len(catalog.Resources))
 
 	for _, resource := range catalog.Resources {
