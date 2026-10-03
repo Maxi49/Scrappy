@@ -111,6 +111,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 packaged-check/Scrappy.app
           packaged-check/Scrappy.app/Contents/MacOS/Scrappy --help
           packaged-check/Scrappy.app/Contents/Frameworks/scrappy-core --version
+          python scripts/smoke_packaged.py packaged-check/Scrappy.app/Contents/MacOS/Scrappy
 
       - name: Smoke test packaged Linux app
         if: runner.os == 'Linux'
@@ -127,6 +128,7 @@ jobs:
           test -x packaged-check/Scrappy/_internal/scrappy-core
           packaged-check/Scrappy/_internal/scrappy-core --version
           env -i HOME="$HOME" QT_QPA_PLATFORM=offscreen packaged-check/Scrappy/Scrappy --help
+          python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy
 
       - name: Smoke test packaged Windows app
         if: runner.os == 'Windows'
@@ -146,6 +148,10 @@ jobs:
             exit $LASTEXITCODE
           }
           & ".\packaged-check\Scrappy\Scrappy.exe" --help
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy.exe
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }

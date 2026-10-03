@@ -31,3 +31,11 @@ def test_go_tests_run_with_the_race_detector() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "go test -race ./..." in workflow
+
+
+def test_every_packaged_app_downloads_end_to_end() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "python scripts/smoke_packaged.py packaged-check/Scrappy.app/Contents/MacOS/Scrappy" in workflow
+    assert "python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy\n" in workflow
+    assert "python scripts/smoke_packaged.py packaged-check/Scrappy/Scrappy.exe" in workflow
