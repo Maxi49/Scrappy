@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 from typing import Callable, Iterable, Optional
 
 from gui.models import Materia
@@ -17,10 +18,61 @@ class CoreError(RuntimeError):
     pass
 
 
+class CoreCancelled(CoreError):
+    pass
+
+
+CANCEL_GRACE_SECONDS = 5
+
+
 class CoreClient:
     def __init__(self, core_path: Optional[str] = None):
         self._project_root = Path(__file__).resolve().parents[1]
-        self._command = self._resolve_command(core_path)
+        self._core_path = core_path
+        self._resolved_command: Optional[list[str]] = None
+        self._lock = threading.Lock()
+        self._process: Optional[subprocess.Popen] = None
+        self._cancelled = False
+
+    @property
+    def _command(self) -> list[str]:
+        # Resolved on first use so a missing core surfaces as a worker error,
+        # not as an exception while the UI builds the worker.
+        if self._resolved_command is None:
+            self._resolved_command = self._resolve_command(self._core_path)
+        return self._resolved_command
+
+    def cancel(self) -> None:
+        """Pide al núcleo Go que termine; puede llamarse desde otro hilo.
+
+        El core atrapa la señal, guarda el manifiesto con lo ya descargado y
+        sale. Si no lo hace a tiempo, se lo mata.
+        """
+        with self._lock:
+            self._cancelled = True
+            process = self._process
+        if process is not None:
+            self._stop(process)
+
+    @staticmethod
+    def _stop(process: subprocess.Popen) -> None:
+        """Cierra el stdin del core (su señal de cancelación en toda plataforma)
+        y lo mata sólo si no terminó dentro del margen."""
+        if process.poll() is not None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+        except OSError:
+            pass
+
+        def force_stop():
+            if process.poll() is None:
+                process.kill()
+
+        timer = threading.Timer(CANCEL_GRACE_SECONDS, force_stop)
+        timer.daemon = True
+        timer.start()
 
     def list_courses(
         self, username: str, password: str, base_url: str
@@ -77,6 +129,9 @@ class CoreClient:
         progress: Optional[Callable[[str], None]] = None,
         allow_failure: bool = False,
     ) -> dict:
+        with self._lock:
+            if self._cancelled:
+                return self._cancelled_outcome(None, allow_failure)
         try:
             process = subprocess.Popen(
                 self._command,
@@ -90,15 +145,28 @@ class CoreClient:
             )
         except OSError as exc:
             raise CoreError(f"No se pudo iniciar el núcleo Go: {exc}") from exc
+        with self._lock:
+            self._process = process
+            cancelled = self._cancelled
+        if cancelled:
+            self._stop(process)
 
         assert process.stdin is not None
         assert process.stdout is not None
+        # stdin stays open: closing it is how cancel() asks the core to stop,
+        # and it also stops the core if this process dies.
+        payload = {**payload, "cancel_on_stdin_close": True}
         try:
             json.dump(payload, process.stdin, ensure_ascii=False)
             process.stdin.write("\n")
-            process.stdin.close()
+            process.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
             process.kill()
+            process.wait()
+            with self._lock:
+                self._process = None
+                if self._cancelled:
+                    return self._cancelled_outcome(None, allow_failure)
             raise CoreError("El núcleo Go se cerró antes de recibir la solicitud.") from exc
 
         result: Optional[dict] = None
@@ -118,6 +186,15 @@ class CoreClient:
                 result = event
 
         return_code = process.wait()
+        with self._lock:
+            self._process = None
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+            cancelled = self._cancelled
+        if cancelled or (result is not None and result.get("cancelled")):
+            return self._cancelled_outcome(result, allow_failure)
         if result is None:
             detail = diagnostics[-1] if diagnostics else f"código de salida {return_code}"
             raise CoreError(f"El núcleo Go no devolvió un resultado válido: {detail}")
@@ -126,6 +203,15 @@ class CoreClient:
         if not result.get("ok") and not allow_failure:
             raise CoreError(str(result.get("error") or "Error desconocido del núcleo Go."))
         return result
+
+    @staticmethod
+    def _cancelled_outcome(result: Optional[dict], allow_failure: bool) -> dict:
+        if not allow_failure:
+            raise CoreCancelled("Operación cancelada.")
+        outcome = dict(result or {})
+        outcome.update(ok=False, cancelled=True)
+        outcome.setdefault("error", "Operación cancelada.")
+        return outcome
 
     def _resolve_command(self, explicit_path: Optional[str]) -> list[str]:
         executable_name = "scrappy-core.exe" if os.name == "nt" else "scrappy-core"

@@ -11,13 +11,22 @@ from gui.panels.materias import MateriasPanel
 from gui.panels.registro import RegistroPanel
 from gui.sidebar import Sidebar
 from gui.theme import BG_APP, GLOBAL_STYLESHEET
-from gui.workers import FetchMateriasWorker, ScraperWorker
+from gui.workers import (
+    STATUS_CANCELLED,
+    STATUS_OK,
+    STATUS_PARTIAL,
+    FetchMateriasWorker,
+    ScraperWorker,
+)
 from utils.config import Config
 
 PANEL_CONEXION = 0
 PANEL_MATERIAS = 1
 PANEL_CONFIGURACION = 2
 PANEL_REGISTRO = 3
+
+# Seconds to let the Go core save its manifest after a cancel before closing.
+CLOSE_WAIT_MS = 10_000
 
 
 class ScrappyGUI(QtWidgets.QMainWindow):
@@ -65,6 +74,7 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.config_panel = ConfiguracionPanel(self._output_path)
         self.config_panel.output_path_changed.connect(self._on_output_path_changed)
         self.registro_panel = RegistroPanel()
+        self.registro_panel.cancel_requested.connect(self._cancel_scraping)
 
         for panel in (
             self.conexion_panel,
@@ -83,7 +93,14 @@ class ScrappyGUI(QtWidgets.QMainWindow):
     def _on_nav_changed(self, index: int):
         self.stack.setCurrentIndex(index)
 
+    @staticmethod
+    def _is_running(worker) -> bool:
+        return worker is not None and worker.isRunning()
+
     def _start_fetch(self, username: str, password: str):
+        # The saved-credentials auto login and a Conectar click can race.
+        if self._is_running(self.fetch_worker):
+            return
         self._username = username
         self._password = password
         self.conexion_panel.set_loading(True)
@@ -110,8 +127,11 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.critical(self, "Error de conexión", error_message)
 
     def _start_scraping(self, materias: list, materia_modes: dict):
+        if self._is_running(self.worker):
+            return
         self.materias_panel.set_running(True)
         self.registro_panel.clear()
+        self.registro_panel.set_running(True)
         self._navigate_to(PANEL_REGISTRO)
         self.worker = ScraperWorker(
             username=self._username,
@@ -125,16 +145,65 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.worker.finished.connect(self._on_scraping_finished)
         self.worker.start()
 
-    def _on_scraping_finished(self, success: bool, message: str):
+    def _cancel_scraping(self):
+        if not self._is_running(self.worker):
+            return
+        self.registro_panel.set_cancelling()
+        self.registro_panel.append("■ Cancelando... lo ya descargado queda guardado.")
+        self.worker.cancel()
+
+    def _on_scraping_finished(self, status: str, message: str):
         self.materias_panel.set_running(False)
-        if success:
+        self.registro_panel.set_running(False)
+        output_path = self.config_panel.get_output_path()
+        if status == STATUS_OK:
             self.registro_panel.append("✓ Descarga completada.")
-            self.registro_panel.append(f"  Guardado en: {self.config_panel.get_output_path()}")
+            self.registro_panel.append(f"  Guardado en: {output_path}")
+            return
+        if status == STATUS_CANCELLED:
+            self.registro_panel.append("■ Descarga cancelada. Lo ya descargado quedó guardado.")
+            return
+        if status == STATUS_PARTIAL:
+            self.registro_panel.append(f"⚠ Descarga completada con errores: {message}")
+            self.registro_panel.append(f"  Guardado en: {output_path}")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Descarga completada con errores",
+                "Se descargó todo lo posible, pero algunas materias o archivos fallaron.\n\n"
+                "El detalle está en el Registro y en sync-report.json.",
+            )
             return
 
         error_message = message or "Error desconocido."
         self.registro_panel.append(f"✗ Error: {error_message}")
-        QtWidgets.QMessageBox.critical(self, "Error durante el scraping", error_message)
+        QtWidgets.QMessageBox.critical(self, "Error durante la descarga", error_message)
+
+    def _confirm_close_during_sync(self) -> bool:
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Descarga en curso",
+            "Hay una descarga en curso. ¿Cancelarla y cerrar Scrappy?\n\n"
+            "Lo ya descargado queda guardado.",
+        )
+        return answer == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def closeEvent(self, a0):
+        if self._is_running(self.worker):
+            if not self._confirm_close_during_sync():
+                a0.ignore()
+                return
+        # Stop the Go core and wait for each thread: a QThread destroyed while
+        # running crashes the app, and an orphaned core keeps downloading.
+        for worker in (self.worker, self.fetch_worker):
+            if not self._is_running(worker):
+                continue
+            try:
+                worker.finished.disconnect()
+            except TypeError:
+                pass
+            worker.cancel()
+            worker.wait(CLOSE_WAIT_MS)
+        a0.accept()
 
     def _on_output_path_changed(self, path: str):
         self._output_path = path

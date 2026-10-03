@@ -14,9 +14,9 @@ class ScraperWorkerSignalTest(unittest.TestCase):
         with patch("gui.workers.CoreClient") as Mock:
             Mock.return_value.sync.return_value = {"ok": True}
             w = ScraperWorker("u", "p", "/tmp", [], {}, "tok")
-            w.finished.connect(lambda ok, msg: results.append((ok, msg)))
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
             w.run()
-        self.assertEqual(results, [(True, "")])
+        self.assertEqual(results, [("ok", "")])
 
     def test_finished_signal_emits_on_failure(self):
         from gui.workers import ScraperWorker
@@ -24,9 +24,36 @@ class ScraperWorkerSignalTest(unittest.TestCase):
         with patch("gui.workers.CoreClient") as Mock:
             Mock.return_value.sync.return_value = {"ok": False, "error": "falló"}
             w = ScraperWorker("u", "p", "/tmp", [], {}, "")
-            w.finished.connect(lambda ok, msg: results.append((ok, msg)))
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
             w.run()
-        self.assertFalse(results[0][0])
+        self.assertEqual(results, [("error", "falló")])
+
+    def test_failure_after_syncing_is_reported_as_partial(self):
+        from gui.workers import ScraperWorker
+        results = []
+        with patch("gui.workers.CoreClient") as Mock:
+            Mock.return_value.sync.return_value = {"ok": False, "error": "2 fallaron", "report": {"downloaded": 5}}
+            w = ScraperWorker("u", "p", "/tmp", [], {}, "")
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
+            w.run()
+        self.assertEqual(results, [("partial", "2 fallaron")])
+
+    def test_cancelled_sync_is_reported_as_cancelled(self):
+        from gui.workers import ScraperWorker
+        results = []
+        with patch("gui.workers.CoreClient") as Mock:
+            Mock.return_value.sync.return_value = {"ok": False, "cancelled": True, "error": "x", "report": {}}
+            w = ScraperWorker("u", "p", "/tmp", [], {}, "")
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
+            w.run()
+        self.assertEqual(results[0][0], "cancelled")
+
+    def test_cancel_reaches_the_core_client(self):
+        from gui.workers import FetchMateriasWorker, ScraperWorker
+        with patch("gui.workers.CoreClient") as Mock:
+            ScraperWorker("u", "p", "/tmp", [], {}, "").cancel()
+            FetchMateriasWorker("u", "p", "https://moodle").cancel()
+        self.assertEqual(Mock.return_value.cancel.call_count, 2)
 
     def test_report_summary_is_streamed_before_finishing(self):
         from gui.workers import ScraperWorker
@@ -40,7 +67,7 @@ class ScraperWorkerSignalTest(unittest.TestCase):
             Mock.return_value.sync.return_value = {"ok": False, "error": "parcial", "report": report}
             w = ScraperWorker("u", "p", "/tmp", [], {}, "tok")
             w.progress.connect(lines.append)
-            w.finished.connect(lambda ok, msg: results.append((ok, msg)))
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
             w.run()
         summary = "\n".join(lines)
         self.assertIn("3 descargados", summary)
@@ -48,7 +75,7 @@ class ScraperWorkerSignalTest(unittest.TestCase):
         self.assertIn("5 sin cambios", summary)
         self.assertIn("1 con error", summary)
         self.assertIn("Rota", summary)
-        self.assertEqual(results, [(False, "parcial")])
+        self.assertEqual(results, [("partial", "parcial")])
 
     def test_fetch_worker_uses_go_core(self):
         from gui.models import Materia
@@ -62,5 +89,15 @@ class ScraperWorkerSignalTest(unittest.TestCase):
             worker.finished.connect(lambda *args: results.append(args))
             worker.run()
         self.assertEqual(results, [(True, materias, "", "tok")])
+
+    def test_missing_core_is_reported_by_the_worker(self):
+        from gui.workers import ScraperWorker
+        results = []
+        with patch.dict("os.environ", {"SCRAPPY_CORE_PATH": ""}), \
+                patch("gui.core_bridge.CoreClient._resolve_command", side_effect=RuntimeError("sin core")):
+            w = ScraperWorker("u", "p", "/tmp", [], {}, "")
+            w.finished.connect(lambda status, msg: results.append((status, msg)))
+            w.run()
+        self.assertEqual(results, [("error", "sin core")])
 
 if __name__ == "__main__": unittest.main()

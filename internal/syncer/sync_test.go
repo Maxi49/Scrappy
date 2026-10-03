@@ -2,6 +2,8 @@ package syncer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,5 +244,49 @@ func TestDownloadErrorsNeverExposeTheToken(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-moodle-token") {
 		t.Fatalf("token leaked into error: %v", err)
+	}
+}
+
+func TestCancelledRunKeepsFinishedFilesAndReportsNoFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasSuffix(request.URL.Path, "/lento.pdf") {
+			<-request.Context().Done()
+			return
+		}
+		_, _ = response.Write([]byte("%PDF"))
+	}))
+	defer server.Close()
+	client, _ := moodle.NewClient(server.URL, "token")
+	file := func(id, name string) moodle.Resource {
+		return moodle.Resource{
+			ID: id, CourseID: 7, CourseName: "Materia", ModuleName: "Unidad", Name: name,
+			URL: server.URL + "/webservice/pluginfile.php/1/" + name, Type: moodle.ResourcePDF, Size: 4, Accessible: true,
+		}
+	}
+	resources := []moodle.Resource{file("a", "rapido.pdf"), file("b", "lento.pdf")}
+	for index := 0; index < 20; index++ {
+		resources = append(resources, file(fmt.Sprintf("z%02d", index), fmt.Sprintf("pendiente%02d.pdf", index)))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	directory := t.TempDir()
+	report, err := Run(ctx, client, moodle.Catalog{Resources: resources}, Options{
+		OutputPath: directory, Workers: 2,
+		Progress: func(message string) {
+			if message == "✓ rapido.pdf" {
+				cancel()
+			}
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !report.Cancelled || report.Failed != 0 || report.Downloaded != 1 {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	manifest, _ := loadManifest(filepath.Join(directory, "config", "manifest.json"))
+	module := manifest.module(7, "Materia", "Unidad", false)
+	if module == nil || module.Resources["a"] == nil {
+		t.Fatal("the file finished before cancelling was not recorded")
 	}
 }

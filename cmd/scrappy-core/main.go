@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/Maxi49/Scrappy/internal/moodle"
 	"github.com/Maxi49/Scrappy/internal/syncer"
@@ -25,6 +28,10 @@ type request struct {
 	OutputPath string          `json:"output_path"`
 	Export     *bool           `json:"export"`
 	Courses    []courseRequest `json:"courses"`
+	// CancelOnStdinClose makes the caller's stdin the cancel switch: closing
+	// it (or the caller dying) stops the operation. Works on every platform,
+	// unlike signals, which Windows cannot deliver to a console-less child.
+	CancelOnStdinClose bool `json:"cancel_on_stdin_close"`
 }
 
 type courseRequest struct {
@@ -63,19 +70,42 @@ func main() {
 	}
 
 	out := &emitter{encoder: json.NewEncoder(os.Stdout)}
-	decoder := json.NewDecoder(bufio.NewReader(os.Stdin))
+	stdin := bufio.NewReader(os.Stdin)
+	decoder := json.NewDecoder(stdin)
 	var input request
 	if err := decoder.Decode(&input); err != nil {
 		out.send(map[string]any{"event": "result", "ok": false, "error": "solicitud JSON inválida"})
 		os.Exit(2)
 	}
-	if err := run(context.Background(), input, out); err != nil {
+	// The UI cancels by terminating the process; stop cleanly so the manifest
+	// keeps every file that finished before the signal.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	if input.CancelOnStdinClose {
+		ctx = cancelOnEOF(ctx, io.MultiReader(decoder.Buffered(), stdin))
+	}
+	err := run(ctx, input, out)
+	stop()
+	if err != nil {
 		if errors.Is(err, errResultAlreadySent) {
+			os.Exit(1)
+		}
+		if ctx.Err() != nil {
+			out.send(map[string]any{"event": "result", "ok": false, "cancelled": true, "error": "operación cancelada"})
 			os.Exit(1)
 		}
 		out.send(map[string]any{"event": "result", "ok": false, "error": err.Error()})
 		os.Exit(1)
 	}
+}
+
+// cancelOnEOF returns a context that ends when reader reaches EOF or fails.
+func cancelOnEOF(parent context.Context, reader io.Reader) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		_, _ = io.Copy(io.Discard, reader)
+		cancel()
+	}()
+	return ctx
 }
 
 func run(ctx context.Context, input request, out *emitter) error {
@@ -131,7 +161,10 @@ func run(ctx context.Context, input request, out *emitter) error {
 			WriteIndexes: input.Export == nil || *input.Export,
 		})
 		if syncErr != nil {
-			out.send(map[string]any{"event": "result", "ok": false, "error": syncErr.Error(), "report": report})
+			out.send(map[string]any{
+				"event": "result", "ok": false, "cancelled": report.Cancelled,
+				"error": syncErr.Error(), "report": report,
+			})
 			return errResultAlreadySent
 		}
 		out.send(map[string]any{"event": "result", "ok": true, "report": report})

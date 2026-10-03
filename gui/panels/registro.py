@@ -1,9 +1,11 @@
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from gui.theme import BORDER, LOG_BG, LOG_FG, TEXT_SECONDARY
 
 
 class RegistroPanel(QtWidgets.QWidget):
+    cancel_requested = QtCore.pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
@@ -27,8 +29,15 @@ class RegistroPanel(QtWidgets.QWidget):
             QPushButton#ghost:hover {{ color: #aaaaaa; border-color: #555555; }}
         """)
         clear_btn.clicked.connect(self.clear)
+        self.cancel_btn = QtWidgets.QPushButton("Cancelar descarga")
+        self.cancel_btn.setObjectName("ghost")
+        self.cancel_btn.setFixedHeight(26)
+        self.cancel_btn.setStyleSheet(clear_btn.styleSheet())
+        self.cancel_btn.clicked.connect(self.cancel_requested.emit)
+        self.cancel_btn.hide()
         header.addWidget(title)
         header.addStretch()
+        header.addWidget(self.cancel_btn)
         header.addWidget(clear_btn)
         layout.addLayout(header)
 
@@ -54,6 +63,15 @@ class RegistroPanel(QtWidgets.QWidget):
         if scroll is None:
             return
         scroll.setValue(scroll.maximum())
+
+    def set_running(self, running: bool):
+        self.cancel_btn.setText("Cancelar descarga")
+        self.cancel_btn.setEnabled(running)
+        self.cancel_btn.setVisible(running)
+
+    def set_cancelling(self):
+        self.cancel_btn.setText("Cancelando...")
+        self.cancel_btn.setEnabled(False)
 
     def clear(self):
         self.log_view.clear()

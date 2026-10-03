@@ -45,6 +45,7 @@ type Report struct {
 	Skipped      int                `json:"skipped"`
 	Inaccessible int                `json:"inaccessible"`
 	Failed       int                `json:"failed"`
+	Cancelled    bool               `json:"cancelled,omitempty"`
 	Failures     []Failure          `json:"failures,omitempty"`
 	Diagnostics  moodle.Diagnostics `json:"api_diagnostics"`
 }
@@ -145,8 +146,13 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 		}()
 	}
 	go func() {
+	feed:
 		for _, current := range jobs {
-			jobChannel <- current
+			select {
+			case jobChannel <- current:
+			case <-ctx.Done():
+				break feed
+			}
 		}
 		close(jobChannel)
 		wait.Wait()
@@ -155,6 +161,11 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 
 	for result := range outcomes {
 		resource := result.job.resource
+		if result.err != nil && ctx.Err() != nil {
+			// Interrupted by the user, not a Moodle failure; the next sync
+			// simply picks this resource up again.
+			continue
+		}
 		if result.err != nil {
 			report.Failed++
 			report.Failures = append(report.Failures, Failure{
@@ -191,8 +202,12 @@ func Run(ctx context.Context, client *moodle.Client, catalog moodle.Catalog, opt
 		return report, fmt.Errorf("guardar manifiesto: %w", err)
 	}
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	report.Cancelled = ctx.Err() != nil
 	if err := writeExports(outputPath, catalog.Resources, report, options.WriteIndexes); err != nil {
 		return report, fmt.Errorf("exportar resultados: %w", err)
+	}
+	if report.Cancelled {
+		return report, fmt.Errorf("sincronización cancelada: %w", ctx.Err())
 	}
 	if report.Failed > 0 {
 		return report, fmt.Errorf("%d materia(s) o recurso(s) fallaron; ver sync-report.json", report.Failed)

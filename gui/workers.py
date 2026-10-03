@@ -1,6 +1,6 @@
 from typing import Optional, List
 from PyQt6 import QtCore
-from gui.core_bridge import CoreClient
+from gui.core_bridge import CoreCancelled, CoreClient
 from gui.models import Materia
 from utils.config import Config
 
@@ -26,8 +26,26 @@ def summarize_report(report: Optional[dict]) -> List[str]:
     return lines
 
 
+STATUS_OK = "ok"
+STATUS_PARTIAL = "partial"
+STATUS_ERROR = "error"
+STATUS_CANCELLED = "cancelled"
+
+
+def sync_status(result: dict) -> str:
+    """Clasifica el resultado del core: un reporte sin ok significa que la
+    sincronización corrió pero algunas materias o recursos fallaron."""
+    if result.get("cancelled"):
+        return STATUS_CANCELLED
+    if result.get("ok"):
+        return STATUS_OK
+    if result.get("report") is not None:
+        return STATUS_PARTIAL
+    return STATUS_ERROR
+
+
 class ScraperWorker(QtCore.QThread):
-    finished = QtCore.pyqtSignal(bool, str)
+    finished = QtCore.pyqtSignal(str, str)
     progress = QtCore.pyqtSignal(str)
 
     def __init__(
@@ -46,10 +64,14 @@ class ScraperWorker(QtCore.QThread):
         self.materias = materias
         self.materia_modes = materia_modes or {}
         self.api_token = api_token
+        self._client = CoreClient()
+
+    def cancel(self):
+        self._client.cancel()
 
     def run(self):
         try:
-            result = CoreClient().sync(
+            result = self._client.sync(
                 username=self.username,
                 password=self.password,
                 token=self.api_token,
@@ -61,10 +83,13 @@ class ScraperWorker(QtCore.QThread):
             )
             for line in summarize_report(result.get("report")):
                 self.progress.emit(line)
-            ok = bool(result.get("ok"))
-            self.finished.emit(ok, "" if ok else str(result.get("error", "Error durante la descarga.")))
+            status = sync_status(result)
+            message = "" if status == STATUS_OK else str(result.get("error") or "Error durante la descarga.")
+            self.finished.emit(status, message)
+        except CoreCancelled as exc:
+            self.finished.emit(STATUS_CANCELLED, str(exc))
         except Exception as exc:
-            self.finished.emit(False, str(exc))
+            self.finished.emit(STATUS_ERROR, str(exc))
 
 
 class FetchMateriasWorker(QtCore.QThread):
@@ -75,10 +100,14 @@ class FetchMateriasWorker(QtCore.QThread):
         self.username = username
         self.password = password
         self.base_url = base_url
+        self._client = CoreClient()
+
+    def cancel(self):
+        self._client.cancel()
 
     def run(self):
         try:
-            materias, token = CoreClient().list_courses(
+            materias, token = self._client.list_courses(
                 self.username, self.password, self.base_url
             )
             if not materias:
