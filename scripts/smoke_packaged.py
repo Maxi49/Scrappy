@@ -99,6 +99,9 @@ def main() -> int:
         print(__doc__, file=sys.stderr)
         return 2
     executable = Path(sys.argv[1]).resolve()
+    # The Windows runner console is cp1252; echoing the app's output must not
+    # kill the reader thread, or a full pipe would stall the app.
+    sys.stdout.reconfigure(errors="replace")
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeMoodle)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
