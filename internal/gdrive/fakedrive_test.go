@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakeFile struct {
@@ -32,6 +34,12 @@ type fakeDrive struct {
 	mu     sync.Mutex
 	files  map[string]*fakeFile
 	hits   map[string]int
+
+	// listDelay makes every list call slow; inFlight/maxInFlight measure how
+	// many run at once.
+	listDelay   time.Duration
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
 }
 
 var listQuery = regexp.MustCompile(`^'([\w-]+)' in parents and trashed = false$`)
@@ -107,6 +115,17 @@ func (d *fakeDrive) metadata(file *fakeFile) map[string]any {
 }
 
 func (d *fakeDrive) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/drive/v3/files" && d.listDelay > 0 {
+		current := d.inFlight.Add(1)
+		for {
+			seen := d.maxInFlight.Load()
+			if current <= seen || d.maxInFlight.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(d.listDelay)
+		d.inFlight.Add(-1)
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	query := r.URL.Query()

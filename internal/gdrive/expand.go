@@ -6,6 +6,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maxi49/Scrappy/internal/moodle"
@@ -144,6 +145,7 @@ func Expand(ctx context.Context, client *Client, catalog moodle.Catalog, options
 		walk := &walker{
 			client: client, options: options, wanted: wanted, previous: previousNodes,
 			root: root, link: item.resource, visited: map[string]bool{}, seen: seen,
+			slots: make(chan struct{}, listConcurrency),
 		}
 		file, oauth, err := client.Get(ctx, item.link.ID, item.link.ResourceKey)
 		if err == nil && file.MimeType == shortcutMIME && file.ShortcutDetails != nil {
@@ -176,6 +178,9 @@ func Expand(ctx context.Context, client *Client, catalog moodle.Catalog, options
 			chain = []string{root.ID}
 		}
 		root.Node = walk.node(ctx, file, chain, directory)
+		if file.MimeType == FolderMIME && (options.Full || options.Selection.Included([]string{root.ID}) || wanted[root.ID]) {
+			walk.report(true)
+		}
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -201,7 +206,10 @@ func Expand(ctx context.Context, client *Client, catalog moodle.Catalog, options
 		if a.Subfolder != b.Subfolder {
 			return a.Subfolder < b.Subfolder
 		}
-		return a.Name < b.Name
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
 	})
 	result.Catalog.Resources = resources
 	result.Catalog.Diagnostics.ResourcesBySource = bySource
@@ -210,20 +218,63 @@ func Expand(ctx context.Context, client *Client, catalog moodle.Catalog, options
 	return result, nil
 }
 
+// listConcurrency bounds the folder listings in flight per Drive link; a
+// university-wide tree has hundreds of folders and one request each.
+const listConcurrency = 8
+
+// progressEvery throttles the "N carpetas, M archivos" progress line.
+var progressEvery = 2 * time.Second
+
 type walker struct {
-	client    *Client
-	options   ExpandOptions
-	wanted    map[string]bool
-	previous  map[string]*Node
-	root      *Root
-	link      moodle.Resource
-	visited   map[string]bool
-	seen      map[string]bool
-	resources []moodle.Resource
-	failures  []RootFailure
+	client   *Client
+	options  ExpandOptions
+	wanted   map[string]bool
+	previous map[string]*Node
+	root     *Root
+	link     moodle.Resource
+	slots    chan struct{}
+
+	mu         sync.Mutex // guards everything below
+	visited    map[string]bool
+	seen       map[string]bool
+	resources  []moodle.Resource
+	failures   []RootFailure
+	folders    int
+	files      int
+	lastReport time.Time
+}
+
+// count records a listed node and reports progress at most every
+// progressEvery.
+func (w *walker) count(folder bool) {
+	w.mu.Lock()
+	if folder {
+		w.folders++
+	} else {
+		w.files++
+	}
+	w.mu.Unlock()
+	w.report(false)
+}
+
+func (w *walker) report(force bool) {
+	if w.options.Progress == nil {
+		return
+	}
+	w.mu.Lock()
+	if !force && time.Since(w.lastReport) < progressEvery {
+		w.mu.Unlock()
+		return
+	}
+	w.lastReport = time.Now()
+	message := fmt.Sprintf("Drive: «%s» — %d carpetas, %d archivos…", w.root.LinkName, w.folders, w.files)
+	w.mu.Unlock()
+	w.options.Progress(message)
 }
 
 func (w *walker) fail(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if len(w.failures) > 0 {
 		return // one failure per link is enough to act on
 	}
@@ -246,6 +297,7 @@ func (w *walker) node(ctx context.Context, file File, chain []string, directory 
 	}
 	chain = append(chain[:len(chain):len(chain)], file.ID)
 	if file.MimeType != FolderMIME {
+		w.count(false)
 		node.Kind = KindFile
 		if _, exportable := exports[file.MimeType]; !exportable && strings.HasPrefix(file.MimeType, "application/vnd.google-apps.") {
 			node.Kind = KindLink
@@ -257,17 +309,27 @@ func (w *walker) node(ctx context.Context, file File, chain []string, directory 
 	}
 
 	node.Kind = KindFolder
-	if w.visited[file.ID] {
+	w.mu.Lock()
+	cycle := w.visited[file.ID]
+	w.visited[file.ID] = true
+	w.mu.Unlock()
+	if cycle {
 		return node
 	}
-	w.visited[file.ID] = true
 	if !w.options.Full && !w.options.Selection.Included(chain) && !w.wanted[file.ID] {
 		if previous := w.previous[file.ID]; previous != nil {
 			node.Children = previous.Children
 		}
 		return node
 	}
+	w.count(true)
+	select {
+	case w.slots <- struct{}{}:
+	case <-ctx.Done():
+		return node
+	}
 	children, err := w.client.List(ctx, file.ID, file.ResourceKey, w.root.OAuth)
+	<-w.slots
 	if err != nil {
 		if ctx.Err() == nil {
 			w.fail(err)
@@ -277,9 +339,13 @@ func (w *walker) node(ctx context.Context, file File, chain []string, directory 
 		}
 		return node
 	}
-	for _, child := range children {
+	// Subfolders are walked concurrently; each keeps its slot in the listing
+	// order so the tree reads the same on every scan.
+	nodes := make([]*Node, len(children))
+	var wait sync.WaitGroup
+	for index, child := range children {
 		if ctx.Err() != nil {
-			return node
+			break
 		}
 		if child.MimeType == shortcutMIME {
 			if child.ShortcutDetails == nil {
@@ -291,17 +357,30 @@ func (w *walker) node(ctx context.Context, file File, chain []string, directory 
 			}
 			child = target
 		}
-		childDirectory := directory
-		if child.MimeType == FolderMIME {
-			childDirectory = append(directory[:len(directory):len(directory)], segment(child.Name))
+		if child.MimeType != FolderMIME {
+			nodes[index] = w.node(ctx, child, chain, directory)
+			continue
 		}
-		node.Children = append(node.Children, w.node(ctx, child, chain, childDirectory))
+		childDirectory := append(directory[:len(directory):len(directory)], segment(child.Name))
+		wait.Add(1)
+		go func(index int, child File) {
+			defer wait.Done()
+			nodes[index] = w.node(ctx, child, chain, childDirectory)
+		}(index, child)
+	}
+	wait.Wait()
+	for _, child := range nodes {
+		if child != nil {
+			node.Children = append(node.Children, child)
+		}
 	}
 	return node
 }
 
 func (w *walker) emit(file File, node *Node, directory []string) {
 	id := moodle.StableID(fmt.Sprintf("gdrive|%d|%s", w.root.CourseID, file.ID))
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.seen[id] {
 		return
 	}

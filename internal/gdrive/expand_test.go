@@ -2,9 +2,12 @@ package gdrive
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Maxi49/Scrappy/internal/moodle"
 )
@@ -275,5 +278,45 @@ func TestExpandWithoutCredentialsOnlyWarns(t *testing.T) {
 	}
 	if len(result.Tree.Roots) != 0 {
 		t.Fatalf("a build without Drive must not report roots: %+v", result.Tree.Roots)
+	}
+}
+
+func TestFullScanListsFoldersInParallelAndReportsProgress(t *testing.T) {
+	files := []*fakeFile{{ID: "ROOT", Name: "Universidad", MimeType: folderMIME, Public: true}}
+	for i := 0; i < 12; i++ {
+		folder := fmt.Sprintf("C%02d", i)
+		files = append(files,
+			&fakeFile{ID: folder, Name: "Cátedra " + folder, MimeType: folderMIME, Parent: "ROOT", Public: true},
+			&fakeFile{ID: folder + "-f", Name: "apunte.pdf", MimeType: "application/pdf", Parent: folder, Content: "x", Public: true},
+		)
+	}
+	drive := newFakeDrive(t, files...)
+	drive.listDelay = 30 * time.Millisecond
+	client := newTestClient(t, "")
+	var messages []string
+	var mu sync.Mutex
+	progress := func(message string) {
+		mu.Lock()
+		defer mu.Unlock()
+		messages = append(messages, message)
+	}
+	original := progressEvery
+	progressEvery = 0
+	t.Cleanup(func() { progressEvery = original })
+	result, err := Expand(context.Background(), client, catalogWith(driveLink(7, "U1", "Material", "https://drive.google.com/drive/folders/ROOT")),
+		ExpandOptions{Full: true, Progress: progress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drive.maxInFlight.Load() < 2 {
+		t.Fatalf("folders were listed one at a time (max in flight %d)", drive.maxInFlight.Load())
+	}
+	children := result.Tree.Roots[0].Node.Children
+	if len(children) != 12 || children[0].ID != "C00" || children[11].ID != "C11" || len(children[5].Children) != 1 {
+		t.Fatalf("tree order or content changed: %d children", len(children))
+	}
+	last := messages[len(messages)-1]
+	if !strings.Contains(last, "13 carpetas") || !strings.Contains(last, "12 archivos") {
+		t.Fatalf("progress = %q", messages)
 	}
 }
