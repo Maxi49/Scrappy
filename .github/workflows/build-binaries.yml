@@ -95,12 +95,21 @@ jobs:
           mkdir dmg-root
           ditto dist/Scrappy.app dmg-root/Scrappy.app
           ln -s /Applications dmg-root/Applications
-          hdiutil create \
-            -volname Scrappy \
-            -srcfolder dmg-root \
-            -ov \
-            -format UDZO \
-            "artifacts/${{ matrix.artifact }}.dmg"
+          # hdiutil intermittently fails with "Resource busy" on hosted runners.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create \
+              -volname Scrappy \
+              -srcfolder dmg-root \
+              -ov \
+              -format UDZO \
+              "artifacts/${{ matrix.artifact }}.dmg"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Verify packaged macOS app
         if: runner.os == 'macOS'
