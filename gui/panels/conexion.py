@@ -64,6 +64,7 @@ class ConexionPanel(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self._dot = StatusDot()
         self.status_label = QtWidgets.QLabel("Desconectado")
+        self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; background: transparent; border: none;")
         row.addWidget(self._dot, alignment=QtCore.Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.status_label, alignment=QtCore.Qt.AlignmentFlag.AlignVCenter)

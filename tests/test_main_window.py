@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 
 def get_app():
@@ -355,3 +355,77 @@ class ErrorHookTest(unittest.TestCase):
             self.assertIn("Traceback", content)
             critical.assert_called_once()
             self.assertIn(str(log), critical.call_args.args[2])
+
+
+class RememberCredentialsTest(unittest.TestCase):
+    SERVICE = "scrappy_moodle_ucc"
+
+    def setUp(self):
+        from PyQt6 import QtCore
+
+        self.app = get_app()
+        QtCore.QStandardPaths.setTestModeEnabled(True)
+        self.addCleanup(QtCore.QStandardPaths.setTestModeEnabled, False)
+        from gui.main_window import user_settings_path
+
+        self.settings = user_settings_path()
+        self.settings.unlink(missing_ok=True)
+        self.addCleanup(self.settings.unlink, missing_ok=True)
+
+    def _window(self, stored=None):
+        from gui.main_window import ScrappyGUI
+
+        stored = stored or {}
+        with patch("keyring.get_password", side_effect=lambda service, key: stored.get((service, key))), \
+                patch.object(QtCore.QTimer, "singleShot"):
+            return ScrappyGUI()
+
+    def _connect(self, window, remember=True):
+        from gui.models import Materia
+
+        window._username, window._password = "2502564", "clave"
+        window.conexion_panel.set_remember(remember)
+        window._on_fetch_finished(True, [Materia("S", "u", "1")], "", "TOKEN")
+
+    def _settings(self):
+        return json.loads(self.settings.read_text(encoding="utf-8"))
+
+    def test_remembering_keeps_the_username_in_settings_and_only_the_password_in_the_keyring(self):
+        window = self._window()
+        with patch("keyring.set_password") as set_password:
+            self._connect(window)
+        set_password.assert_called_once_with(self.SERVICE, "2502564", "clave")
+        self.assertEqual(self._settings()["last_username"], "2502564")
+
+    def test_remembered_user_logs_in_on_start(self):
+        self.settings.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.write_text(json.dumps({"last_username": "2502564"}), encoding="utf-8")
+        window = self._window({(self.SERVICE, "2502564"): "clave"})
+        self.assertEqual(window.conexion_panel.get_credentials(), ("2502564", "clave"))
+        self.assertTrue(window.conexion_panel.should_remember())
+
+    def test_username_remembered_by_older_versions_in_the_keyring_still_works(self):
+        window = self._window({(self.SERVICE, "last_username"): "2502564", (self.SERVICE, "2502564"): "clave"})
+        self.assertEqual(window.conexion_panel.get_credentials(), ("2502564", "clave"))
+
+    def test_keyring_failure_is_reported_instead_of_silently_forgetting(self):
+        window = self._window()
+        with patch("keyring.set_password", side_effect=RuntimeError("acceso denegado")):
+            self._connect(window)
+        self.assertIn("llavero", window.conexion_panel.status_label.text())
+
+    def test_not_remembering_forgets_both(self):
+        window = self._window()
+        with patch("keyring.set_password"):
+            self._connect(window)
+        with patch("keyring.delete_password") as delete_password:
+            self._connect(window, remember=False)
+        delete_password.assert_any_call(self.SERVICE, "2502564")
+        self.assertNotIn("last_username", self._settings())
+
+    def test_changing_the_output_folder_keeps_the_remembered_user(self):
+        window = self._window()
+        with patch("keyring.set_password"):
+            self._connect(window)
+        window._on_output_path_changed("/tmp/otra")
+        self.assertEqual(self._settings(), {"last_output_path": "/tmp/otra", "last_username": "2502564"})

@@ -172,12 +172,15 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self._api_token = token
         if success:
             self._materias = list(materias)
+            warning = ""
             if self.conexion_panel.should_remember():
-                self._save_credentials()
+                warning = self._save_credentials()
             else:
                 self._clear_saved_credentials()
             self.materias_panel.populate(materias)
             status = "Conectado · Go API ✓"
+            if warning:
+                status += f" · {warning}"
             self.conexion_panel.set_status("connected", status)
             self._navigate_to(PANEL_MATERIAS)
             return
@@ -440,58 +443,93 @@ class ScrappyGUI(QtWidgets.QMainWindow):
         self.duplicados_panel.set_folder(path)
         self._save_last_output_path()
 
-    def _load_last_output_path(self):
-        try:
-            source = self._settings_path
-            if not source.exists():
-                source = LEGACY_SETTINGS_PATH
-            if not source.exists():
-                return
-            with open(source, "r", encoding="utf-8") as file:
-                last = json.load(file).get("last_output_path")
-            if last:
-                self._output_path = last
-        except Exception:
-            pass
+    def _read_settings(self) -> dict:
+        for source in (self._settings_path, LEGACY_SETTINGS_PATH):
+            try:
+                with open(source, "r", encoding="utf-8") as file:
+                    settings = json.load(file)
+                if isinstance(settings, dict):
+                    return settings
+            except (OSError, ValueError):
+                continue
+        return {}
 
-    def _save_last_output_path(self):
+    def _update_settings(self, **changes):
+        """Merges changes into the settings file; None removes a key."""
+        settings = self._read_settings()
+        for key, value in changes.items():
+            if value is None:
+                settings.pop(key, None)
+            else:
+                settings[key] = value
         try:
             self._settings_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._settings_path, "w", encoding="utf-8") as file:
-                json.dump({"last_output_path": self._output_path}, file, ensure_ascii=False)
-        except Exception:
+                json.dump(settings, file, ensure_ascii=False)
+        except OSError:
             pass
+
+    def _load_last_output_path(self):
+        last = self._read_settings().get("last_output_path")
+        if last:
+            self._output_path = last
+
+    def _save_last_output_path(self):
+        self._update_settings(last_output_path=self._output_path)
+
+    def _remembered_username(self) -> str:
+        username = str(self._read_settings().get("last_username") or "")
+        if username:
+            return username
+        # Versions before 0.2 kept it in the keyring, where an interrupted
+        # update could delete it.
+        try:
+            return keyring.get_password(self._keyring_service, "last_username") or ""
+        except Exception:
+            return ""
 
     def _load_saved_credentials(self):
+        username = self._remembered_username()
+        if not username:
+            return
         try:
-            username = keyring.get_password(self._keyring_service, "last_username")
-            if not username:
-                return
             password = keyring.get_password(self._keyring_service, username)
-            if not password:
-                return
-            self.conexion_panel.set_credentials(username, password)
-            self.conexion_panel.set_remember(True)
-            QtCore.QTimer.singleShot(200, lambda: self._start_fetch(username, password))
         except Exception:
-            pass
+            return
+        if not password:
+            return
+        self.conexion_panel.set_credentials(username, password)
+        self.conexion_panel.set_remember(True)
+        QtCore.QTimer.singleShot(200, lambda: self._start_fetch(username, password))
 
-    def _save_credentials(self):
-        # Si el usuario recordado cambia, borrar la contraseña del usuario anterior
-        # para no dejarla huérfana en el keychain del sistema indefinidamente.
+    def _save_credentials(self) -> str:
+        """Remembers the login; returns a warning when the keyring refused it.
+
+        The username is not secret and lives in the settings file. Only the
+        password goes to the keyring, whose macOS backend replaces an entry by
+        deleting and re-adding it.
+        """
+        previous = self._remembered_username()
+        if previous and previous != self._username:
+            # Do not leave the previous user's password orphaned in the keyring.
+            try:
+                keyring.delete_password(self._keyring_service, previous)
+            except Exception:
+                pass
         try:
-            usuario_anterior = keyring.get_password(self._keyring_service, "last_username")
-            if usuario_anterior and usuario_anterior != self._username:
-                keyring.delete_password(self._keyring_service, usuario_anterior)
-        except Exception:
-            pass
-        try:
-            keyring.set_password(self._keyring_service, "last_username", self._username)
             keyring.set_password(self._keyring_service, self._username, self._password)
+        except Exception as exc:
+            self._update_settings(last_username=None)
+            return f"no se pudo guardar la contraseña en el llavero del sistema ({exc})"
+        self._update_settings(last_username=self._username)
+        try:
+            keyring.delete_password(self._keyring_service, "last_username")
         except Exception:
             pass
+        return ""
 
     def _clear_saved_credentials(self):
+        self._update_settings(last_username=None)
         for key in ("last_username", self._username):
             try:
                 keyring.delete_password(self._keyring_service, key)
