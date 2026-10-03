@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,41 @@ func TestGetUnreachableFileWithSessionReportsNoAccess(t *testing.T) {
 	_, _, err := client.Get(context.Background(), "MISSING", "")
 	if !errors.Is(err, ErrNoAccess) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGetPreservesGoogleDenialReason(t *testing.T) {
+	for _, test := range []struct {
+		reason   string
+		status   int
+		noAccess bool
+	}{
+		{"insufficientPermissions", 403, false},
+		{"accessNotConfigured", 403, false},
+		{"domainPolicy", 403, false},
+		{"userRateLimitExceeded", 403, false},
+		{"insufficientFilePermissions", 403, true},
+		{"notFound", 404, true},
+	} {
+		t.Run(test.reason, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				googleError(w, test.status, test.reason)
+			}))
+			defer server.Close()
+			original := apiBase
+			apiBase = server.URL
+			defer func() { apiBase = original }()
+			client := newTestClient(t, "RT1")
+			client.retryWait = 0
+			_, _, err := client.Get(context.Background(), "FILE", "")
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != test.status || apiErr.Reason != test.reason {
+				t.Fatalf("lost Google error: %v", err)
+			}
+			if errors.Is(err, ErrNoAccess) != test.noAccess || !strings.Contains(err.Error(), test.reason) {
+				t.Fatalf("misleading error: %v", err)
+			}
+		})
 	}
 }
 

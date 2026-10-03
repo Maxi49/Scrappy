@@ -27,7 +27,7 @@ var (
 	// is connected.
 	ErrPrivate = errors.New("esta carpeta de Drive es privada; conectá Google en Conexión")
 	// ErrNoAccess means neither the API key nor the connected account can read it.
-	ErrNoAccess = errors.New("tu cuenta de Google no tiene acceso; ¿es la cuenta de la UCC?")
+	ErrNoAccess = errors.New("Google Drive no permite acceder a este recurso con la cuenta conectada; verificá el enlace y sus permisos")
 )
 
 // File is the Drive metadata Scrappy needs.
@@ -54,14 +54,28 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	detail := fmt.Sprintf("Google Drive respondió HTTP %d", e.Status)
 	if e.Reason != "" {
-		return fmt.Sprintf("Google Drive respondió HTTP %d (%s)", e.Status, e.Reason)
+		detail += " (" + e.Reason + ")"
 	}
-	return fmt.Sprintf("Google Drive respondió HTTP %d", e.Status)
+	switch e.Reason {
+	case "insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT":
+		return detail + ": " + ErrDrivePermission.Error()
+	case "accessNotConfigured", "SERVICE_DISABLED":
+		return detail + ": la API de Drive no está habilitada para el proyecto de Google de esta aplicación"
+	case "domainPolicy":
+		return detail + ": una política de la organización restringe el acceso de la aplicación"
+	}
+	return detail
 }
 
 func (e *APIError) denied() bool {
 	return e.Status == http.StatusForbidden || e.Status == http.StatusNotFound
+}
+
+func (e *APIError) fileAccessDenied() bool {
+	return e.Status == http.StatusNotFound || (e.Status == http.StatusForbidden &&
+		(e.Reason == "insufficientFilePermissions" || e.Reason == "appNotAuthorizedToFile"))
 }
 
 func (e *APIError) retryable() bool {
@@ -97,13 +111,16 @@ func (c *Client) Get(ctx context.Context, id, resourceKey string) (File, bool, e
 			return file, false, err
 		}
 		if !c.tokens.HasSession() {
-			return file, false, ErrPrivate
+			if apiErr.fileAccessDenied() {
+				return file, false, fmt.Errorf("%w: %w", ErrPrivate, apiErr)
+			}
+			return file, false, err
 		}
 	}
 	err := get(true)
 	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.denied() {
-		return file, true, ErrNoAccess
+	if errors.As(err, &apiErr) && apiErr.fileAccessDenied() {
+		return file, true, fmt.Errorf("%w: %w", ErrNoAccess, apiErr)
 	}
 	if errors.Is(err, ErrNoSession) {
 		return file, true, ErrPrivate

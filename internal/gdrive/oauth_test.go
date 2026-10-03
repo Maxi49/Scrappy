@@ -121,6 +121,50 @@ func TestLoginReturnsRefreshTokenAndEmail(t *testing.T) {
 	}
 }
 
+func TestGoogleSessionChecksGrantedDriveScope(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		scope   any
+		allowed bool
+	}{
+		{"identity only", "openid email", false},
+		{"metadata only", "https://www.googleapis.com/auth/drive.metadata.readonly", false},
+		{"individual files only", "https://www.googleapis.com/auth/drive.file", false},
+		{"empty grant", "", false},
+		{"readonly", loginScopes, true},
+		{"full drive", "openid https://www.googleapis.com/auth/drive", true},
+		// OAuth permits omitting scope when it is unchanged from the request.
+		{"omitted", nil, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fakeTokenServer(t, nil)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				payload := map[string]any{"access_token": "AT2", "expires_in": 3600, "refresh_token": "RT1"}
+				if test.scope != nil {
+					payload["scope"] = test.scope
+				}
+				json.NewEncoder(w).Encode(payload)
+			}))
+			defer server.Close()
+			tokenURL = server.URL
+			result, err := Login(context.Background(), testCreds, browser(t, func(state string) url.Values {
+				return url.Values{"code": {"GOODCODE"}, "state": {state}}
+			}))
+			if (err == nil) != test.allowed {
+				t.Fatalf("login allowed = %v, want %v: %v", err == nil, test.allowed, err)
+			}
+			if !test.allowed && (result.RefreshToken != "" || !strings.Contains(err.Error(), "permiso")) {
+				t.Fatalf("login accepted partial consent or omitted guidance: %+v, %v", result, err)
+			}
+			source := NewTokenSource(testCreds, "RT1")
+			token, err := source.Token(context.Background())
+			if (err == nil) != test.allowed || (!test.allowed && token != "") {
+				t.Fatalf("refresh allowed = %v, want %v: %v", err == nil, test.allowed, err)
+			}
+		})
+	}
+}
+
 func TestLoginRejectsForeignState(t *testing.T) {
 	fakeTokenServer(t, nil)
 	_, err := Login(context.Background(), testCreds, browser(t, func(string) url.Values {

@@ -17,10 +17,11 @@ import (
 const maxAPIResponse = 64 << 20
 
 type Client struct {
-	baseURL    *url.URL
-	token      string
-	httpClient *http.Client
-	retry      RetryConfig
+	baseURL        *url.URL
+	token          string
+	httpClient     *http.Client
+	downloadClient *http.Client
+	retry          RetryConfig
 }
 
 func NewClient(baseURL, token string) (*Client, error) {
@@ -36,6 +37,12 @@ func NewClient(baseURL, token string) (*Client, error) {
 		token:   token,
 		httpClient: &http.Client{
 			Timeout: 2 * time.Minute,
+		},
+		// File transfers need more time on slow connections, especially when
+		// several downloads share the available bandwidth. API calls keep
+		// their shorter timeout; cancellation still uses the request context.
+		downloadClient: &http.Client{
+			Timeout: 15 * time.Minute,
 		},
 		retry: RetryConfig{Attempts: 3, BaseWait: 250 * time.Millisecond},
 	}, nil
@@ -182,7 +189,8 @@ func (c *Client) DownloadURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-func (c *Client) HTTPClient() *http.Client { return c.httpClient }
+// HTTPClient returns the client for file downloads.
+func (c *Client) HTTPClient() *http.Client { return c.downloadClient }
 
 func (c *Client) postForm(ctx context.Context, endpoint string, values url.Values) ([]byte, error) {
 	target := c.baseURL.ResolveReference(&url.URL{Path: endpoint}).String()

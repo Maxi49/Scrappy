@@ -23,14 +23,16 @@ var (
 	loginTimeout = 5 * time.Minute
 )
 
-const loginScopes = "openid email https://www.googleapis.com/auth/drive.readonly"
+const driveReadScope = "https://www.googleapis.com/auth/drive.readonly"
+const loginScopes = "openid email " + driveReadScope
 
 var (
 	// ErrNoSession means the student never connected Google.
 	ErrNoSession = errors.New("no hay una sesión de Google conectada")
 	// ErrAuthExpired means Google no longer accepts the refresh token: testing
 	// apps get seven-day tokens, and the student may also revoke access.
-	ErrAuthExpired = errors.New("la sesión de Google venció; reconectá Google en Conexión")
+	ErrAuthExpired     = errors.New("la sesión de Google venció; reconectá Google en Conexión")
+	ErrDrivePermission = errors.New("falta autorizar el permiso de lectura de Google Drive para Scrappy; reconectá Google en Conexión y aceptá ese permiso")
 )
 
 var tokenHTTP = &http.Client{Timeout: 30 * time.Second}
@@ -121,11 +123,26 @@ func Login(ctx context.Context, creds Credentials, openURL func(string)) (LoginR
 }
 
 type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token"`
-	IDToken      string `json:"id_token"`
-	Error        string `json:"error"`
+	AccessToken  string  `json:"access_token"`
+	ExpiresIn    int     `json:"expires_in"`
+	RefreshToken string  `json:"refresh_token"`
+	IDToken      string  `json:"id_token"`
+	Error        string  `json:"error"`
+	Scope        *string `json:"scope"`
+}
+
+func (t tokenResponse) permitsDriveRead() bool {
+	// OAuth can omit scope when it is unchanged. An explicitly returned
+	// grant must allow reading file contents, not just metadata or identity.
+	if t.Scope == nil {
+		return true
+	}
+	for _, scope := range strings.Fields(*t.Scope) {
+		if scope == driveReadScope || scope == "https://www.googleapis.com/auth/drive" {
+			return true
+		}
+	}
+	return false
 }
 
 type tokenError struct {
@@ -165,6 +182,9 @@ func requestToken(ctx context.Context, creds Credentials, form url.Values) (toke
 	}
 	if decodeErr != nil || tokens.AccessToken == "" {
 		return tokenResponse{}, errors.New("Google devolvió una respuesta inválida")
+	}
+	if !tokens.permitsDriveRead() {
+		return tokenResponse{}, ErrDrivePermission
 	}
 	return tokens, nil
 }
